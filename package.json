@@ -6,10 +6,15 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "start:prod": "NODE_OPTIONS=--max-old-space-size=4096 next start",
+    "start:cluster": "npm run build && pm2 start pm2.config.js",
+    "stop:cluster": "pm2 stop strapifrontend",
+    "logs": "pm2 logs strapifrontend",
     "lint": "eslint"
   },
   "dependencies": {
     "next": "16.2.4",
+    "pdfjs-dist": "^5.7.284",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },
