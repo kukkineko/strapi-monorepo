@@ -39,35 +39,28 @@ type GraphEdge = {
 };
 
 type DBStats = {
-  /** Total entries in Strapi (all categories combined). */
-  totalEntries:        number;
-  /** Total registered users. */
-  totalUsers:          number;
-  /** Unique undirected cross-link pairs (A↔B counts once). */
-  totalLinkPairs:      number;
-  /** Total raw references across every entry's `links` field. ≈ 2× pairs
-   *  when bidirectional invariant is intact. */
-  totalLinkReferences: number;
-  /** Entries that have at least one link in their `links` field. */
-  entriesWithLinks:    number;
-  /** References pointing at a documentId that no longer exists. */
-  danglingReferences:  number;
-  /** Entries that link to themselves (should be 0). */
-  selfReferences:      number;
-  /** Pairs that exist in only one direction (data inconsistency). */
-  oneSidedPairs:       number;
-  categories:          Record<string, number>;
-  generatedAt:         string;
+  totalEntries:          number;
+  totalUsers:            number;
+  totalLinkPairs:        number;
+  totalLinkReferences:   number;
+  entriesWithLinks:      number;
+  danglingReferences:    number;
+  selfReferences:        number;
+  oneSidedPairs:         number;
+  entriesWithDocs:       number;
+  entriesWithImages:     number;
+  linksWithConfidence:   number;
+  linksWithoutConfidence: number;
+  avgConfidence:         number | null;
+  confidenceLow:         number;
+  confidenceMedium:      number;
+  confidenceHigh:        number;
+  categories:            Record<string, number>;
+  generatedAt:           string;
 };
 
 type DBData = {
   stats: DBStats;
-  graph: {
-    nodes:         GraphNode[];
-    edges:         GraphEdge[];
-    positions:     Record<string, { x: number; y: number }>;
-    totalProducts: number;
-  };
 };
 
 /* ─── types ──────────────────────────────────────────────────────────────── */
@@ -1117,21 +1110,9 @@ function CrossLinkGraph({
 }
 
 /* ─── DBStatsContent ─────────────────────────────────────────────────────── */
-/* Fetches and displays live DB statistics + cross-link graph.                */
+/* Fetches and displays live DB statistics.                                   */
 
-export function DBStatsContent({
-  onClose,
-}: {
-  /**
-   * Optional callback invoked just before navigating away from the panel
-   * (e.g. when the admin clicks a product node in the cross-link graph).
-   * Supplied by UserPanel so the modal is dismissed before `router.push`;
-   * without it the portal-rendered panel would stay on screen over the
-   * destination page.
-   */
-  onClose?: () => void;
-} = {}) {
-  const router = useRouter();
+export function DBStatsContent() {
   const [data,    setData]    = useState<DBData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState("");
@@ -1195,7 +1176,7 @@ export function DBStatsContent({
 
   if (!data) return null;
 
-  const { stats, graph } = data;
+  const { stats } = data;
   /* Visible rows in the bar chart. Always drop empty buckets; optionally
      drop "unassigned" when the toggle is on so the admin can see the
      real category distribution without the orphan bucket dominating. */
@@ -1224,11 +1205,6 @@ export function DBStatsContent({
 
   return (
     <div className="wiki-admin-db-section">
-      {/* ── Overview stat boxes ──
-          Four headline figures. "Cross-links" is the unique-pair count
-          (A↔B once); "References" is the gross stored value across every
-          entry's `links` field. When data is healthy and bidirectional,
-          References ≈ 2 × Cross-links. */}
       <div className="wiki-admin-stats">
         <div className="wiki-admin-stat">
           <span className="wiki-admin-stat-num">{fmt(stats.totalEntries)}</span>
@@ -1247,6 +1223,24 @@ export function DBStatsContent({
           <span className="wiki-admin-stat-num">{fmt(stats.totalLinkReferences)}</span>
           <span className="wiki-admin-stat-lbl">References</span>
           <span className="wiki-admin-stat-sub">directed entries</span>
+        </div>
+        <div className="wiki-admin-stat">
+          <span className="wiki-admin-stat-num">{fmt(stats.entriesWithImages)}</span>
+          <span className="wiki-admin-stat-lbl">With Image</span>
+          <span className="wiki-admin-stat-sub">
+            {stats.totalEntries > 0
+              ? `${((stats.entriesWithImages / stats.totalEntries) * 100).toFixed(1)}%`
+              : "0%"}
+          </span>
+        </div>
+        <div className="wiki-admin-stat">
+          <span className="wiki-admin-stat-num">{fmt(stats.entriesWithDocs)}</span>
+          <span className="wiki-admin-stat-lbl">With Document</span>
+          <span className="wiki-admin-stat-sub">
+            {stats.totalEntries > 0
+              ? `${((stats.entriesWithDocs / stats.totalEntries) * 100).toFixed(1)}%`
+              : "0%"}
+          </span>
         </div>
       </div>
 
@@ -1375,31 +1369,56 @@ export function DBStatsContent({
         </div>
       </div>
 
-      {/* ── Cross-link graph ── */}
+      {/* ── Confidence distribution ── */}
       <div className="wiki-admin-db-card">
         <div className="wiki-admin-db-card-header">
-          <span className="wiki-admin-db-card-icon" aria-hidden="true">🔗</span>
+          <span className="wiki-admin-db-card-icon" aria-hidden="true">🎯</span>
           <div>
-            <h3>Cross-link Graph</h3>
-            <p>
-              Products (dots) grouped by category · lines show cross-links between entries ·
-              layout pre-computed server-side
-            </p>
+            <h3>Link Confidence</h3>
+            <p>Distribution of confidence scores across all stored relation edges.</p>
           </div>
         </div>
-        <CrossLinkGraph
-          nodes={graph.nodes}
-          edges={graph.edges}
-          positions={graph.positions}
-          totalProducts={graph.totalProducts}
-          onNavigate={(docId) => {
-            /* Close the owning modal first so the destination page isn't
-               buried under a stuck portal. The graph passes the documentId
-               directly — no need to re-derive it here. */
-            onClose?.();
-            router.push(`/products/${docId}`);
-          }}
-        />
+        <dl className="wiki-admin-db-metrics">
+          <div className="wiki-admin-db-metric">
+            <dt>Average confidence</dt>
+            <dd>
+              {stats.avgConfidence !== null
+                ? `${stats.avgConfidence}%`
+                : <span style={{ color: "#9ca3af" }}>no data</span>}
+            </dd>
+          </div>
+          <div className="wiki-admin-db-metric">
+            <dt>Links with confidence metadata</dt>
+            <dd>
+              {fmt(stats.linksWithConfidence)}
+              {stats.linksWithoutConfidence > 0 && (
+                <span className="wiki-admin-db-metric-sub warn">
+                  {" "}· {fmt(stats.linksWithoutConfidence)} without
+                </span>
+              )}
+            </dd>
+          </div>
+        </dl>
+        {stats.linksWithConfidence > 0 && (
+          <div style={{ padding: "0 1rem 1rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+            {[
+              { label: "Low (< 34%)",   count: stats.confidenceLow,    color: "#ef4444" },
+              { label: "Medium (34–66%)", count: stats.confidenceMedium, color: "#f59e0b" },
+              { label: "High (> 66%)",  count: stats.confidenceHigh,   color: "#10b981" },
+            ].map(({ label, count, color }) => {
+              const pct = stats.linksWithConfidence > 0 ? (count / stats.linksWithConfidence) * 100 : 0;
+              return (
+                <div key={label} className="wiki-admin-db-chart-row">
+                  <span className="wiki-admin-db-chart-label" style={{ minWidth: "9rem" }}>{label}</span>
+                  <div className="wiki-admin-db-chart-bar-wrap">
+                    <div className="wiki-admin-db-chart-bar" style={{ width: `${pct}%`, background: color }} />
+                  </div>
+                  <span className="wiki-admin-db-chart-count">{count.toLocaleString()}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <p className="wiki-admin-db-generated">

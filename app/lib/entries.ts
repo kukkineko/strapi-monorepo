@@ -162,19 +162,19 @@ function pruneSearchCache() {
 }
 
 function isCacheFresh<T>(record: CacheRecord<T> | null | undefined): record is CacheRecord<T> {
-  return Boolean(record);
+  return Boolean(record && Date.now() < record.expiresAt);
 }
 
 function cacheEntry(entry: Entry) {
   const record: CacheRecord<Entry> = {
     value: entry,
-    expiresAt: 0,
+    expiresAt: Date.now() + CACHE_TTL_MS,
   };
 
   entryCacheByDocumentId.set(entry.documentId, record);
   numericIdToDocumentIdCache.set(String(entry.id), {
     value: entry.documentId,
-    expiresAt: 0,
+    expiresAt: Date.now() + CACHE_TTL_MS,
   });
 }
 
@@ -608,7 +608,7 @@ export async function listEntries(): Promise<Entry[]> {
 
     listEntriesCache = {
       value: deduplicated,
-      expiresAt: 0,
+      expiresAt: Date.now() + CACHE_TTL_MS,
     };
 
     for (const entry of deduplicated) {
@@ -698,7 +698,7 @@ export async function listEntriesLight(): Promise<Entry[]> {
 
     listEntriesLightCache = {
       value: deduplicated,
-      expiresAt: 0,
+      expiresAt: Date.now() + CACHE_TTL_MS,
     };
 
     return deduplicated;
@@ -874,7 +874,7 @@ export async function searchEntries(query: string, limit = 24): Promise<Entry[]>
 
     searchEntriesCache.set(cacheKey, {
       value: deduplicated,
-      expiresAt: 0,
+      expiresAt: Date.now() + CACHE_TTL_MS,
     });
     pruneSearchCache();
 
@@ -1091,7 +1091,7 @@ export async function getMediaById(id: number): Promise<EntryMedia | null> {
     if (!res.ok) {
       mediaCacheById.set(id, {
         value: null,
-        expiresAt: 0,
+        expiresAt: Date.now() + CACHE_TTL_MS,
       });
       return null;
     }
@@ -1102,7 +1102,7 @@ export async function getMediaById(id: number): Promise<EntryMedia | null> {
     if (!url) {
       mediaCacheById.set(id, {
         value: null,
-        expiresAt: 0,
+        expiresAt: Date.now() + CACHE_TTL_MS,
       });
       return null;
     }
@@ -1115,7 +1115,7 @@ export async function getMediaById(id: number): Promise<EntryMedia | null> {
 
     mediaCacheById.set(id, {
       value: media,
-      expiresAt: 0,
+      expiresAt: Date.now() + CACHE_TTL_MS,
     });
 
     return media;

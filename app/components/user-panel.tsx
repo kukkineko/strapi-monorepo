@@ -383,14 +383,10 @@ function AdminTab({ onClose }: { onClose: () => void }) {
         <h2 className="wiki-admin-subpage-title">{section.title}</h2>
       </div>
 
-      {/* Page content. `onClose` is forwarded into DBStatsContent so the
-          cross-link graph can close the modal before routing to a product
-          page — without it, `router.push` swaps the URL beneath us but the
-          portal-rendered panel stays glued to the screen. */}
       {view === "users"      && <AdminPanelContent />}
       {view === "audit"      && <AuditLogContent />}
       {view === "db"         && <DBBackupContent />}
-      {view === "stats"      && <DBStatsContent onClose={onClose} />}
+      {view === "stats"      && <DBStatsContent />}
       {view === "import"     && <ImportDataContent />}
       {view === "confidence" && <LinkConfidenceContent />}
     </div>
