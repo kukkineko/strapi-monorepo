@@ -17,6 +17,7 @@ import {
   DBStatsContent,
   ImportDataContent,
   LinkConfidenceContent,
+  AssignDocsContent,
 } from "@/app/components/admin-panel";
 
 /* ─── avatar helpers ─────────────────────────────────────────────────────── */
@@ -261,10 +262,10 @@ function FavouritesTab() {
 
 /* ─── AdminTab ───────────────────────────────────────────────────────────── */
 
-type AdminView = null | "users" | "db" | "stats" | "audit" | "import" | "confidence";
+type AdminView = null | "users" | "db" | "stats" | "audit" | "import" | "confidence" | "assigndocs";
 
 const ADMIN_SECTIONS: Array<{
-  id:     "users" | "db" | "stats" | "audit" | "import" | "confidence";
+  id:     "users" | "db" | "stats" | "audit" | "import" | "confidence" | "assigndocs";
   icon:   string;
   title:  string;
   desc:   string;
@@ -325,6 +326,15 @@ const ADMIN_SECTIONS: Array<{
     color:  "#7c3aed",
     bg:     "#faf5ff",
     border: "#e9d5ff",
+  },
+  {
+    id:     "assigndocs",
+    icon:   "📂",
+    title:  "Assign Documents",
+    desc:   "Scan a folder and auto-assign PDFs to articles by article number",
+    color:  "#0369a1",
+    bg:     "#f0f9ff",
+    border: "#bae6fd",
   },
 ];
 
@@ -389,6 +399,7 @@ function AdminTab({ onClose }: { onClose: () => void }) {
       {view === "stats"      && <DBStatsContent />}
       {view === "import"     && <ImportDataContent />}
       {view === "confidence" && <LinkConfidenceContent />}
+      {view === "assigndocs" && <AssignDocsContent />}
     </div>
   );
 }

@@ -5757,3 +5757,266 @@ span.wiki-relations-list-title {
   padding: 0.1rem 0.45rem;
   line-height: 1.4;
 }
+
+/* ─── AssignDocsContent ──────────────────────────────────────────────────── */
+
+.wiki-assign-docs {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  padding: 1rem 0;
+}
+
+.wiki-assign-docs-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.wiki-assign-docs-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #374151;
+}
+
+.wiki-assign-docs-input-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.wiki-assign-docs-input {
+  flex: 1;
+  padding: 0.45rem 0.7rem;
+  border: 1.5px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-family: ui-monospace, monospace;
+  background: #fff;
+  color: #111827;
+  min-width: 0;
+}
+.wiki-assign-docs-input:focus {
+  outline: none;
+  border-color: #0369a1;
+  box-shadow: 0 0 0 3px rgba(3,105,161,0.12);
+}
+.wiki-assign-docs-input:disabled {
+  background: #f3f4f6;
+  color: #9ca3af;
+}
+
+.wiki-assign-docs-btn {
+  padding: 0.45rem 1rem;
+  background: #0369a1;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+.wiki-assign-docs-btn:hover:not(:disabled) { background: #0284c7; }
+.wiki-assign-docs-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.wiki-assign-docs-hint {
+  font-size: 0.78rem;
+  color: #6b7280;
+  margin: 0;
+}
+.wiki-assign-docs-hint code {
+  font-family: ui-monospace, monospace;
+  background: #f3f4f6;
+  padding: 0.05rem 0.3rem;
+  border-radius: 3px;
+}
+
+/* Results panel */
+.wiki-assign-docs-results {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.wiki-assign-docs-results-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.wiki-assign-docs-results-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #374151;
+  flex: 1;
+}
+
+.wiki-assign-docs-toggle-all {
+  font-size: 0.78rem;
+  color: #0369a1;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+
+/* File list */
+.wiki-assign-docs-file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 420px;
+  overflow-y: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 0.4rem;
+  background: #fafafa;
+}
+
+.wiki-assign-docs-file {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  background: #fff;
+  border: 1.5px solid #d1fae5;
+  border-radius: 6px;
+  padding: 0.5rem 0.7rem;
+}
+
+.wiki-assign-docs-file.no-match {
+  border-color: #fde68a;
+  background: #fffbeb;
+  opacity: 0.85;
+}
+
+.wiki-assign-docs-check {
+  margin-top: 0.25rem;
+  flex-shrink: 0;
+  accent-color: #0369a1;
+  width: 15px;
+  height: 15px;
+}
+
+.wiki-assign-docs-no-match-icon {
+  flex-shrink: 0;
+  font-size: 0.9rem;
+  color: #d97706;
+  margin-top: 0.15rem;
+}
+
+.wiki-assign-docs-file-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.wiki-assign-docs-filename {
+  font-size: 0.82rem;
+  font-family: ui-monospace, monospace;
+  color: #111827;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wiki-assign-docs-doctype {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #0369a1;
+}
+
+.wiki-assign-docs-artnrs {
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+.wiki-assign-docs-warn {
+  font-size: 0.75rem;
+  color: #b45309;
+  font-style: italic;
+}
+
+.wiki-assign-docs-matches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-top: 0.15rem;
+}
+
+.wiki-assign-docs-match-pill {
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: #dbeafe;
+  color: #1e40af;
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+}
+
+/* Actions bar */
+.wiki-assign-docs-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.wiki-assign-docs-assign-btn {
+  padding: 0.45rem 1.25rem;
+  background: #059669;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.wiki-assign-docs-assign-btn:hover:not(:disabled) { background: #047857; }
+.wiki-assign-docs-assign-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.wiki-assign-docs-selected-count {
+  font-size: 0.8rem;
+  color: #6b7280;
+}
+
+/* Summary */
+.wiki-assign-docs-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  background: #f0fdf4;
+  border: 1.5px solid #bbf7d0;
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+}
+
+.wiki-assign-docs-summary-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.85rem;
+  color: #374151;
+}
+.wiki-assign-docs-summary-row.ok strong { color: #059669; }
+.wiki-assign-docs-summary-row.error strong { color: #dc2626; }
+
+.wiki-assign-docs-details {
+  margin-top: 0.3rem;
+  font-size: 0.8rem;
+  color: #374151;
+}
+.wiki-assign-docs-details summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: #1e40af;
+}
+.wiki-assign-docs-details.error summary { color: #dc2626; }
+.wiki-assign-docs-details ul {
+  margin: 0.4rem 0 0 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  list-style: disc;
+}
