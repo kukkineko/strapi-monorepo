@@ -5767,58 +5767,51 @@ span.wiki-relations-list-title {
   padding: 1rem 0;
 }
 
-.wiki-assign-docs-form {
+/* Folder picker row */
+.wiki-assign-docs-picker {
   display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
 }
 
-.wiki-assign-docs-label {
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: #374151;
-}
-
-.wiki-assign-docs-input-row {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.wiki-assign-docs-input {
-  flex: 1;
-  padding: 0.45rem 0.7rem;
-  border: 1.5px solid #d1d5db;
-  border-radius: 6px;
-  font-size: 0.875rem;
-  font-family: ui-monospace, monospace;
-  background: #fff;
-  color: #111827;
-  min-width: 0;
-}
-.wiki-assign-docs-input:focus {
-  outline: none;
-  border-color: #0369a1;
-  box-shadow: 0 0 0 3px rgba(3,105,161,0.12);
-}
-.wiki-assign-docs-input:disabled {
-  background: #f3f4f6;
-  color: #9ca3af;
-}
-
-.wiki-assign-docs-btn {
-  padding: 0.45rem 1rem;
+.wiki-assign-docs-browse-btn {
+  padding: 0.55rem 1.25rem;
   background: #0369a1;
   color: #fff;
   border: none;
-  border-radius: 6px;
-  font-size: 0.875rem;
-  font-weight: 600;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 700;
   cursor: pointer;
   white-space: nowrap;
-  transition: background 0.15s;
+  transition: background 0.15s, box-shadow 0.15s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.12);
 }
-.wiki-assign-docs-btn:hover:not(:disabled) { background: #0284c7; }
-.wiki-assign-docs-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.wiki-assign-docs-browse-btn:hover:not(:disabled) {
+  background: #0284c7;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.16);
+}
+.wiki-assign-docs-browse-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.wiki-assign-docs-folder-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #1e40af;
+  background: #dbeafe;
+  border-radius: 6px;
+  padding: 0.25rem 0.7rem;
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wiki-assign-docs-scanning {
+  font-size: 0.85rem;
+  color: #6b7280;
+  font-style: italic;
+}
 
 .wiki-assign-docs-hint {
   font-size: 0.78rem;

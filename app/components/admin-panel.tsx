@@ -16,6 +16,7 @@ import {
   serializeLinkEntries,
   searchEntries,
   getEntryById,
+  uploadMedia,
 } from "@/app/lib/entries";
 
 /* ─── shared types ───────────────────────────────────────────────────────── */
@@ -4014,206 +4015,308 @@ export function LinkConfidenceContent() {
 }
 
 /* ─── AssignDocsContent ──────────────────────────────────────────────────── */
-/* Scan a local folder for PDFs, parse article numbers from filenames,        */
-/* and auto-assign the documents to matching Strapi entries.                  */
+/* Pick a folder with the native folder picker, parse PDF filenames for       */
+/* article numbers, look up matching Strapi entries, and bulk-assign docs.    */
 
-type DocFile = {
+/** Parse a PDF filename → { artNrs, docType }.
+ *  Leading underscore-separated digit tokens are article numbers;
+ *  the first non-digit token starts the document-type label. */
+function parseDocFilename(filename: string): { artNrs: string[]; docType: string } {
+  const bare   = filename.replace(/\.pdf$/i, "");
+  const tokens = bare.split("_");
+  const artNrs: string[] = [];
+  let labelStart = tokens.length;
+  for (let i = 0; i < tokens.length; i++) {
+    if (/^\d+$/.test(tokens[i]!)) { artNrs.push(tokens[i]!); }
+    else { labelStart = i; break; }
+  }
+  return { artNrs, docType: tokens.slice(labelStart).join(" ").trim() || "Dokument" };
+}
+
+type DocMatch = { documentId: string; title: string; artNr?: string };
+
+type DocFileLocal = {
+  file:       File;
   filename:   string;
   artNrs:     string[];
   docType:    string;
-  matches:    Array<{ documentId: string; title: string; artNr?: string }>;
-  allMatched: boolean;
+  matches:    DocMatch[];
 };
 
-type ScanResult = {
-  folder: string;
-  files:  DocFile[];
-};
+type AssignDetail = { filename: string; docType: string; entry: string };
+type AssignError  = { filename: string; error: string };
 
-type AssignResult = {
+type AssignResultLocal = {
   assigned: number;
   skipped:  number;
-  errors:   Array<{ filename: string; error: string }>;
-  details:  Array<{ filename: string; docType: string; artNr: string; entry: string; mediaId?: number }>;
+  errors:   AssignError[];
+  details:  AssignDetail[];
 };
 
+type TextEntryLocal = {
+  title:        string;
+  description:  string;
+  link?:        string;
+  attachments?: (string | number)[];
+};
+
+function parseDocsLocal(raw?: string): TextEntryLocal[] {
+  if (!raw?.trim()) return [];
+  try {
+    const p = JSON.parse(raw) as unknown;
+    if (Array.isArray(p)) return p as TextEntryLocal[];
+  } catch { /* ignore */ }
+  return [];
+}
+
 export function AssignDocsContent() {
-  const [folder,       setFolder]       = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [folderName,   setFolderName]   = useState("");   // display label
+  const [files,        setFiles]        = useState<DocFileLocal[]>([]);
   const [scanning,     setScanning]     = useState(false);
-  const [scanResult,   setScanResult]   = useState<ScanResult | null>(null);
   const [scanError,    setScanError]    = useState("");
   const [selected,     setSelected]     = useState<Set<string>>(new Set());
   const [assigning,    setAssigning]    = useState(false);
-  const [assignResult, setAssignResult] = useState<AssignResult | null>(null);
+  const [assignResult, setAssignResult] = useState<AssignResultLocal | null>(null);
   const [assignError,  setAssignError]  = useState("");
 
-  async function handleScan(e: React.FormEvent) {
-    e.preventDefault();
-    if (!folder.trim()) return;
+  /* ── Folder picker handler ── */
+  async function handleFilesChosen(e: React.ChangeEvent<HTMLInputElement>) {
+    const chosen = Array.from(e.target.files ?? []).filter((f) =>
+      /\.pdf$/i.test(f.name),
+    );
+    if (!chosen.length) return;
+
+    // Derive folder display name from the webkitRelativePath of the first file.
+    const firstRel = (chosen[0] as File & { webkitRelativePath?: string }).webkitRelativePath ?? "";
+    setFolderName(firstRel ? firstRel.split("/")[0]! : "Selected folder");
+
     setScanning(true);
     setScanError("");
-    setScanResult(null);
     setAssignResult(null);
     setSelected(new Set());
+
     try {
-      const res = await fetch(
-        `/api/auth/admin/assign-docs?folder=${encodeURIComponent(folder.trim())}`,
-      );
-      const body = (await res.json()) as ScanResult & { error?: string };
-      if (!res.ok) throw new Error(body.error ?? "Scan failed.");
-      setScanResult(body);
-      // Pre-select all files that have at least one match.
-      setSelected(new Set(body.files.filter((f) => f.matches.length > 0).map((f) => f.filename)));
+      // Parse filenames client-side.
+      const parsed = chosen.map((f) => ({ file: f, filename: f.name, ...parseDocFilename(f.name) }));
+
+      // Collect all unique artNrs across all files.
+      const allArtNrs = Array.from(new Set(parsed.flatMap((p) => p.artNrs)));
+
+      // Ask the server to resolve artNrs → Strapi entries (keeps token server-side).
+      let matchMap: Record<string, DocMatch[]> = {};
+      if (allArtNrs.length > 0) {
+        const params = new URLSearchParams();
+        allArtNrs.forEach((nr) => params.append("artNrs[]", nr));
+        const res  = await fetch(`/api/auth/admin/assign-docs?${params.toString()}`);
+        const body = (await res.json()) as { matches?: Record<string, DocMatch[]>; error?: string };
+        if (!res.ok) throw new Error(body.error ?? "Lookup failed.");
+        matchMap = body.matches ?? {};
+      }
+
+      // Build per-file match lists (deduplicated by documentId).
+      const result: DocFileLocal[] = parsed.map((p) => {
+        const seen = new Set<string>();
+        const matches: DocMatch[] = [];
+        for (const nr of p.artNrs) {
+          for (const m of matchMap[nr] ?? []) {
+            if (!seen.has(m.documentId)) { seen.add(m.documentId); matches.push(m); }
+          }
+        }
+        return { ...p, matches };
+      });
+
+      setFiles(result);
+      setSelected(new Set(result.filter((f) => f.matches.length > 0).map((f) => f.filename)));
     } catch (err) {
       setScanError(err instanceof Error ? err.message : "Scan failed.");
+      setFiles([]);
     } finally {
       setScanning(false);
+      // Reset the input so the same folder can be re-selected after changes.
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
 
+  /* ── Selection helpers ── */
   function toggleFile(filename: string) {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(filename)) next.delete(filename);
-      else next.add(filename);
+      if (next.has(filename)) next.delete(filename); else next.add(filename);
       return next;
     });
   }
 
   function toggleAll() {
-    if (!scanResult) return;
-    const eligible = scanResult.files.filter((f) => f.matches.length > 0).map((f) => f.filename);
-    const allSelected = eligible.every((f) => selected.has(f));
-    setSelected(allSelected ? new Set() : new Set(eligible));
+    const eligible = files.filter((f) => f.matches.length > 0).map((f) => f.filename);
+    const allSel   = eligible.every((f) => selected.has(f));
+    setSelected(allSel ? new Set() : new Set(eligible));
   }
 
+  /* ── Assignment ── */
   async function handleAssign() {
-    if (!scanResult || selected.size === 0) return;
+    if (!files.length || selected.size === 0) return;
     setAssigning(true);
     setAssignError("");
     setAssignResult(null);
-    try {
-      const res = await fetch("/api/auth/admin/assign-docs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          folder:    scanResult.folder,
-          filenames: Array.from(selected),
-        }),
-      });
-      const body = (await res.json()) as AssignResult & { error?: string };
-      if (!res.ok) throw new Error(body.error ?? "Assignment failed.");
-      setAssignResult(body);
-    } catch (err) {
-      setAssignError(err instanceof Error ? err.message : "Assignment failed.");
-    } finally {
-      setAssigning(false);
+
+    const result: AssignResultLocal = { assigned: 0, skipped: 0, errors: [], details: [] };
+
+    const toProcess = files.filter((f) => selected.has(f.filename));
+
+    for (const docFile of toProcess) {
+      if (docFile.matches.length === 0) { result.skipped++; continue; }
+
+      // 1. Upload the PDF to Strapi media library.
+      let mediaId: number;
+      try {
+        const ids = await uploadMedia([docFile.file]);
+        mediaId = ids[0]!;
+        if (!mediaId) throw new Error("No media ID returned.");
+      } catch (err) {
+        result.errors.push({ filename: docFile.filename, error: err instanceof Error ? err.message : String(err) });
+        continue;
+      }
+
+      // 2. For each matched entry: fetch current docs, append, PUT back.
+      for (const match of docFile.matches) {
+        try {
+          // Fetch current entry to get live docs field.
+          const current = await getEntryById(match.documentId);
+          const existing = parseDocsLocal(current?.docs);
+
+          // Dedup: skip if same title + attachment already exists.
+          const alreadyPresent = existing.some(
+            (d) => d.title === docFile.docType && d.attachments?.includes(mediaId),
+          );
+          if (alreadyPresent) { result.skipped++; continue; }
+
+          const updated: TextEntryLocal[] = [
+            ...existing,
+            { title: docFile.docType, description: "", attachments: [mediaId] },
+          ];
+
+          // PUT via the Next.js API route (adds auth + audit log).
+          const putRes = await fetch(`/api/entries/${match.documentId}`, {
+            method:  "PUT",
+            headers: { "Content-Type": "application/json" },
+            body:    JSON.stringify({ docs: JSON.stringify(updated), _auditSection: "docs" }),
+          });
+          if (!putRes.ok) {
+            const body = (await putRes.json()) as { error?: string };
+            throw new Error(body.error ?? `PUT failed (${putRes.status})`);
+          }
+
+          result.assigned++;
+          result.details.push({ filename: docFile.filename, docType: docFile.docType, entry: match.title || match.documentId });
+        } catch (err) {
+          result.errors.push({
+            filename: `${docFile.filename} → ${match.title || match.documentId}`,
+            error:    err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
     }
+
+    setAssignResult(result);
+    setAssigning(false);
   }
 
-  const eligibleCount  = scanResult?.files.filter((f) => f.matches.length > 0).length ?? 0;
-  const noMatchCount   = scanResult?.files.filter((f) => f.matches.length === 0 && f.artNrs.length > 0).length ?? 0;
-  const noArtNrCount   = scanResult?.files.filter((f) => f.artNrs.length === 0).length ?? 0;
-  const allEligibleSel = eligibleCount > 0 && scanResult?.files
-    .filter((f) => f.matches.length > 0)
-    .every((f) => selected.has(f.filename));
+  /* ── Derived counts ── */
+  const eligibleCount  = files.filter((f) => f.matches.length > 0).length;
+  const noMatchCount   = files.filter((f) => f.matches.length === 0 && f.artNrs.length > 0).length;
+  const noArtNrCount   = files.filter((f) => f.artNrs.length === 0).length;
+  const allEligibleSel = eligibleCount > 0 && files.filter((f) => f.matches.length > 0).every((f) => selected.has(f.filename));
 
   return (
     <div className="wiki-assign-docs">
-      {/* ── Folder input ── */}
-      <form className="wiki-assign-docs-form" onSubmit={(e) => void handleScan(e)}>
-        <label className="wiki-assign-docs-label" htmlFor="assign-docs-folder">
-          Documents folder path
-        </label>
-        <div className="wiki-assign-docs-input-row">
-          <input
-            id="assign-docs-folder"
-            type="text"
-            className="wiki-assign-docs-input"
-            value={folder}
-            onChange={(e) => setFolder(e.target.value)}
-            placeholder="C:\path\to\folder  or  /path/to/folder"
-            disabled={scanning || assigning}
-          />
-          <button
-            type="submit"
-            className="wiki-assign-docs-btn"
-            disabled={!folder.trim() || scanning || assigning}
-          >
-            {scanning ? "Scanning…" : "Scan"}
-          </button>
-        </div>
-        <p className="wiki-assign-docs-hint">
-          PDFs must be named like <code>03135_03136_Installationsanleitung.pdf</code> — numeric
-          tokens before the first word are matched as article numbers.
-        </p>
-      </form>
+
+      {/* ── Folder picker ── */}
+      {/* Hidden file input — webkitdirectory lets the user pick an entire folder */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        // @ts-expect-error -- webkitdirectory is non-standard but widely supported
+        webkitdirectory=""
+        multiple
+        accept=".pdf"
+        style={{ display: "none" }}
+        onChange={(e) => void handleFilesChosen(e)}
+      />
+
+      <div className="wiki-assign-docs-picker">
+        <button
+          type="button"
+          className="wiki-assign-docs-browse-btn"
+          disabled={scanning || assigning}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          📂 Browse folder…
+        </button>
+        {folderName && !scanning && (
+          <span className="wiki-assign-docs-folder-name">{folderName}</span>
+        )}
+        {scanning && <span className="wiki-assign-docs-scanning">Scanning…</span>}
+      </div>
+
+      <p className="wiki-assign-docs-hint">
+        PDFs must be named like <code>03135_03136_Installationsanleitung.pdf</code> — numeric
+        tokens before the first word are matched as article numbers.
+      </p>
 
       {scanError && <p className="wiki-error">{scanError}</p>}
 
-      {/* ── Scan results ── */}
-      {scanResult && (
+      {/* ── File list ── */}
+      {files.length > 0 && (
         <div className="wiki-assign-docs-results">
           <div className="wiki-assign-docs-results-header">
             <span className="wiki-assign-docs-results-title">
-              {scanResult.files.length} PDF{scanResult.files.length !== 1 ? "s" : ""} found
+              {files.length} PDF{files.length !== 1 ? "s" : ""}
               {eligibleCount > 0 && ` · ${eligibleCount} matched`}
-              {noMatchCount > 0 && ` · ${noMatchCount} unmatched`}
-              {noArtNrCount > 0 && ` · ${noArtNrCount} no article numbers`}
+              {noMatchCount  > 0 && ` · ${noMatchCount} unmatched`}
+              {noArtNrCount  > 0 && ` · ${noArtNrCount} no article numbers`}
             </span>
             {eligibleCount > 0 && (
-              <button
-                type="button"
-                className="wiki-assign-docs-toggle-all"
-                onClick={toggleAll}
-              >
+              <button type="button" className="wiki-assign-docs-toggle-all" onClick={toggleAll}>
                 {allEligibleSel ? "Deselect all" : "Select all"}
               </button>
             )}
           </div>
 
           <div className="wiki-assign-docs-file-list">
-            {scanResult.files.map((file) => {
-              const hasMatches = file.matches.length > 0;
-              const isSelected = selected.has(file.filename);
+            {files.map((f) => {
+              const hasMatches = f.matches.length > 0;
               return (
-                <div
-                  key={file.filename}
-                  className={`wiki-assign-docs-file${hasMatches ? "" : " no-match"}`}
-                >
-                  {hasMatches && (
+                <div key={f.filename} className={`wiki-assign-docs-file${hasMatches ? "" : " no-match"}`}>
+                  {hasMatches ? (
                     <input
                       type="checkbox"
                       className="wiki-assign-docs-check"
-                      checked={isSelected}
-                      onChange={() => toggleFile(file.filename)}
+                      checked={selected.has(f.filename)}
+                      onChange={() => toggleFile(f.filename)}
                       disabled={assigning}
                     />
-                  )}
-                  {!hasMatches && (
+                  ) : (
                     <span className="wiki-assign-docs-no-match-icon" aria-hidden="true">⚠</span>
                   )}
                   <div className="wiki-assign-docs-file-info">
-                    <span className="wiki-assign-docs-filename" title={file.filename}>
-                      {file.filename}
-                    </span>
-                    <span className="wiki-assign-docs-doctype">{file.docType}</span>
-                    {file.artNrs.length > 0 ? (
-                      <span className="wiki-assign-docs-artnrs">
-                        {file.artNrs.join(", ")}
-                      </span>
+                    <span className="wiki-assign-docs-filename" title={f.filename}>{f.filename}</span>
+                    <span className="wiki-assign-docs-doctype">{f.docType}</span>
+                    {f.artNrs.length > 0 ? (
+                      <span className="wiki-assign-docs-artnrs">{f.artNrs.join(", ")}</span>
                     ) : (
                       <span className="wiki-assign-docs-warn">No article numbers in filename</span>
                     )}
                     {hasMatches ? (
                       <span className="wiki-assign-docs-matches">
-                        {file.matches.map((m) => (
+                        {f.matches.map((m) => (
                           <span key={m.documentId} className="wiki-assign-docs-match-pill">
                             {m.title || m.artNr || m.documentId}
                           </span>
                         ))}
                       </span>
-                    ) : file.artNrs.length > 0 ? (
+                    ) : f.artNrs.length > 0 ? (
                       <span className="wiki-assign-docs-warn">No matching entries found</span>
                     ) : null}
                   </div>
@@ -4230,9 +4333,7 @@ export function AssignDocsContent() {
                 disabled={selected.size === 0 || assigning}
                 onClick={() => void handleAssign()}
               >
-                {assigning
-                  ? "Assigning…"
-                  : `Assign ${selected.size} document${selected.size !== 1 ? "s" : ""}`}
+                {assigning ? "Assigning…" : `Assign ${selected.size} document${selected.size !== 1 ? "s" : ""}`}
               </button>
               <span className="wiki-assign-docs-selected-count">
                 {selected.size} of {eligibleCount} selected
@@ -4244,7 +4345,7 @@ export function AssignDocsContent() {
 
       {assignError && <p className="wiki-error" style={{ marginTop: "1rem" }}>{assignError}</p>}
 
-      {/* ── Assignment result ── */}
+      {/* ── Summary ── */}
       {assignResult && (
         <div className="wiki-assign-docs-summary">
           <div className="wiki-assign-docs-summary-row ok">
@@ -4252,7 +4353,7 @@ export function AssignDocsContent() {
             <strong>{assignResult.assigned}</strong>
           </div>
           <div className="wiki-assign-docs-summary-row">
-            <span>Skipped (no match)</span>
+            <span>Skipped</span>
             <strong>{assignResult.skipped}</strong>
           </div>
           {assignResult.errors.length > 0 && (
@@ -4266,9 +4367,7 @@ export function AssignDocsContent() {
               <summary>{assignResult.details.length} assignment{assignResult.details.length !== 1 ? "s" : ""} made</summary>
               <ul>
                 {assignResult.details.map((d, i) => (
-                  <li key={i}>
-                    <strong>{d.entry}</strong> ← {d.filename} ({d.docType})
-                  </li>
+                  <li key={i}><strong>{d.entry}</strong> ← {d.filename} ({d.docType})</li>
                 ))}
               </ul>
             </details>
