@@ -7014,35 +7014,6 @@ span.wiki-relations-list-title {
 
 
 
-/* ── Compare button (on product pages) ──────────────────────────────────── */
-
-.wiki-compare-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  padding: 0.3rem 0.65rem;
-  border-radius: 6px;
-  border: 1.5px solid #cbd5e1;
-  background: transparent;
-  color: #64748b;
-  font-size: 0.78rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: border-color 0.15s, color 0.15s, background 0.15s;
-  white-space: nowrap;
-}
-
-.wiki-compare-btn:hover {
-  border-color: #6366f1;
-  color: #6366f1;
-  background: #f5f3ff;
-}
-
-.wiki-compare-btn.active {
-  border-color: #6366f1;
-  background: #ede9fe;
-  color: #4f46e5;
-}
 
 /* ── Tab bar (sticky bottom) ────────────────────────────────────────────── */
 
@@ -7054,45 +7025,45 @@ span.wiki-relations-list-title {
   z-index: 200;
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.5rem 1rem;
+  gap: 0.4rem;
+  padding: 0.42rem 0.85rem;
   background: #1e2235;
   border-top: 1px solid #2d3452;
   box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.25);
+  min-height: 42px;
+}
+
+.wiki-tab-bar--empty {
+  /* slim bar when no tabs open yet */
+  padding: 0.3rem 0.85rem;
+  min-height: 36px;
 }
 
 .wiki-tab-bar-tabs {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.3rem;
   flex: 1;
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
 }
-
 .wiki-tab-bar-tabs::-webkit-scrollbar { display: none; }
 
-.wiki-tab-bar-hint {
-  font-size: 0.72rem;
-  color: #64748b;
-  white-space: nowrap;
-  margin-left: 0.4rem;
-}
+/* ── Tab pill ── */
 
 .wiki-tab-pill {
   display: inline-flex;
-  align-items: center;
-  gap: 0;
+  align-items: stretch;
   border-radius: 6px;
   border: 1px solid #2d3452;
   background: #252b40;
   color: #c4cbe8;
   font-size: 0.77rem;
   white-space: nowrap;
-  max-width: 180px;
-  overflow: hidden;
+  max-width: 200px;
   flex-shrink: 0;
+  overflow: hidden;
   transition: border-color 0.12s;
 }
 
@@ -7102,311 +7073,148 @@ span.wiki-relations-list-title {
 }
 
 .wiki-tab-pill-label {
-  padding: 0.28rem 0.55rem;
-  background: none;
-  border: none;
+  display: block;
+  padding: 0.3rem 0.55rem;
   color: inherit;
   font-size: inherit;
-  cursor: pointer;
+  text-decoration: none;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 140px;
+  max-width: 160px;
 }
 
 .wiki-tab-pill-label:hover { color: #a5b4fc; }
 
 .wiki-tab-pill-close {
-  padding: 0.28rem 0.4rem;
+  padding: 0.28rem 0.38rem;
   background: none;
   border: none;
-  color: #64748b;
+  border-left: 1px solid #2d3452;
+  color: #475569;
   cursor: pointer;
   font-size: 1rem;
   line-height: 1;
   flex-shrink: 0;
+  transition: color 0.1s;
 }
-
 .wiki-tab-pill-close:hover { color: #f87171; }
 
-.wiki-tab-bar-controls {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  flex-shrink: 0;
-}
+/* ── New tab "+" button ── */
 
-.wiki-tab-layout-toggle {
-  display: inline-flex;
-  border-radius: 6px;
-  overflow: hidden;
-  border: 1px solid #2d3452;
-}
-
-.wiki-tab-layout-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.28rem;
-  padding: 0.28rem 0.65rem;
-  background: #252b40;
-  border: none;
-  color: #94a3b8;
-  font-size: 0.77rem;
-  cursor: pointer;
-  transition: background 0.12s, color 0.12s;
-}
-
-.wiki-tab-layout-btn + .wiki-tab-layout-btn {
-  border-left: 1px solid #2d3452;
-}
-
-.wiki-tab-layout-btn:hover { background: #2d3452; color: #c4cbe8; }
-
-.wiki-tab-layout-btn.active {
-  background: #4f46e5;
-  color: #fff;
-}
-
-.wiki-tab-compare-btn {
+.wiki-tab-new-btn {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  padding: 0.3rem 0.8rem;
+  padding: 0.28rem 0.6rem;
   border-radius: 6px;
-  background: #4f46e5;
-  color: #fff;
-  font-size: 0.78rem;
-  font-weight: 600;
-  text-decoration: none;
-  transition: background 0.15s;
-  white-space: nowrap;
-}
-
-.wiki-tab-compare-btn:hover { background: #4338ca; color: #fff; }
-
-/* ── Compare page ───────────────────────────────────────────────────────── */
-
-.compare-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.75rem 1.5rem;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
-  flex-wrap: wrap;
-}
-
-.compare-toolbar-title {
-  font-size: 1rem;
-  font-weight: 600;
-  margin: 0;
-}
-
-.compare-toolbar-controls {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-}
-
-.compare-1x1-nav {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.compare-1x1-counter {
-  font-size: 0.82rem;
+  border: 1px dashed #3a4060;
+  background: transparent;
   color: #64748b;
-  min-width: 40px;
-  text-align: center;
+  font-size: 0.77rem;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: border-color 0.12s, color 0.12s;
+}
+.wiki-tab-new-btn:hover {
+  border-color: #6366f1;
+  color: #a5b4fc;
 }
 
-.compare-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 1rem;
-  padding: 1rem 1.5rem 5rem;
-  flex: 1;
+/* ── Search popover (above the tab bar) ── */
+
+.wiki-tab-search-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 199;
 }
 
-.compare-grid-2x2 {
-  grid-template-columns: repeat(2, 1fr);
-  grid-template-rows: repeat(2, auto);
-}
-
-@media (max-width: 700px) {
-  .compare-grid-2x2 {
-    grid-template-columns: 1fr;
-  }
-}
-
-/* ── Compare pane ───────────────────────────────────────────────────────── */
-
-.compare-pane {
-  background: var(--surface);
-  border: 1px solid var(--border);
+.wiki-tab-search-popover {
+  position: fixed;
+  bottom: 48px;
+  left: 0.85rem;
+  z-index: 210;
+  width: min(420px, calc(100vw - 1.7rem));
+  background: #fff;
+  border: 1px solid #e2e8f0;
   border-radius: 10px;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.18);
   overflow: hidden;
   display: flex;
   flex-direction: column;
 }
 
-.compare-pane-header {
+.wiki-tab-search-input {
+  width: 100%;
+  padding: 0.65rem 0.9rem;
+  border: none;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 0.9rem;
+  outline: none;
+  background: #fafafa;
+  box-sizing: border-box;
+}
+
+.wiki-tab-search-results {
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.wiki-tab-search-status {
+  padding: 0.65rem 0.9rem;
+  font-size: 0.82rem;
+  color: #94a3b8;
+  margin: 0;
+}
+
+.wiki-tab-search-item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 0.6rem 0.85rem;
-  background: var(--surface-raised, #f8f9fc);
-  border-bottom: 1px solid var(--border);
-  gap: 0.5rem;
-}
-
-.compare-pane-title-link {
-  font-size: 0.88rem;
-  font-weight: 600;
-  color: var(--link);
+  gap: 0.65rem;
+  padding: 0.55rem 0.9rem;
   text-decoration: none;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
+  color: inherit;
+  transition: background 0.1s;
 }
+.wiki-tab-search-item:hover { background: #f1f5f9; }
 
-.compare-pane-title-link:hover { text-decoration: underline; }
-
-.compare-pane-remove {
-  background: none;
-  border: none;
-  color: #94a3b8;
-  font-size: 1.1rem;
-  line-height: 1;
-  cursor: pointer;
-  padding: 0 0.2rem;
+.wiki-tab-search-thumb {
+  width: 36px;
+  height: 36px;
   flex-shrink: 0;
-}
-
-.compare-pane-remove:hover { color: #f87171; }
-
-.compare-pane-status {
-  padding: 1rem;
-}
-
-.compare-pane-image-wrap {
-  width: 100%;
-  aspect-ratio: 4 / 3;
-  background: #f1f5f9;
-  position: relative;
+  border-radius: 4px;
   overflow: hidden;
-}
-
-.compare-pane-image {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-
-.compare-pane-no-image {
-  width: 100%;
-  height: 100%;
+  background: #f1f5f9;
   display: flex;
   align-items: center;
   justify-content: center;
+  font-size: 0.6rem;
   color: #94a3b8;
-  font-size: 0.82rem;
+}
+.wiki-tab-search-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
-.compare-pane-image-nav {
-  position: absolute;
-  bottom: 0.5rem;
-  left: 50%;
-  transform: translateX(-50%);
+.wiki-tab-search-text {
   display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  background: rgba(0,0,0,0.55);
-  border-radius: 999px;
-  padding: 0.2rem 0.6rem;
-  color: #fff;
-  font-size: 0.78rem;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
 }
-
-.compare-pane-image-nav button {
-  background: none;
-  border: none;
-  color: #fff;
-  cursor: pointer;
-  font-size: 1rem;
-  padding: 0 0.1rem;
-  line-height: 1;
-}
-
-.compare-pane-image-nav button:disabled { opacity: 0.35; }
-
-.compare-pane-fields {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 0.35rem 0.75rem;
-  padding: 0.7rem 0.85rem;
-  margin: 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.compare-field-row {
-  display: contents;
-}
-
-.compare-pane-fields dt {
-  font-size: 0.75rem;
-  color: #64748b;
-  font-weight: 500;
-  align-self: center;
-}
-
-.compare-pane-fields dd {
-  font-size: 0.82rem;
-  font-weight: 500;
-  margin: 0;
+.wiki-tab-search-text strong {
+  font-size: 0.84rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  align-self: center;
+}
+.wiki-tab-search-text span {
+  font-size: 0.75rem;
+  color: #64748b;
 }
 
-.compare-pane-desc {
-  padding: 0.6rem 0.85rem;
-  font-size: 0.82rem;
-  color: #4b5563;
-  line-height: 1.5;
-  margin: 0;
-  border-bottom: 1px solid var(--border);
-  display: -webkit-box;
-  -webkit-line-clamp: 4;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.compare-pane-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.3rem;
-  padding: 0.5rem 0.85rem;
-  border-bottom: 1px solid var(--border);
-}
-
-.compare-pane-open-link {
-  display: block;
-  padding: 0.5rem 0.85rem;
-  font-size: 0.78rem;
-  color: var(--link);
-  text-decoration: none;
-  margin-top: auto;
-}
-
-.compare-pane-open-link:hover { text-decoration: underline; }
-
-/* Extra bottom padding for content above the tab bar */
-body:has(.wiki-tab-bar) .wiki-shell {
-  padding-bottom: 3rem;
+/* Extra bottom padding for page content above the tab bar */
+.wiki-shell {
+  padding-bottom: 50px;
 }

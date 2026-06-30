@@ -15,7 +15,6 @@ import type { Entry, EntryPayload, LinkEntry } from "@/app/lib/entries";
 import { getEntryById, getMediaById, listEntries, normalizeRubrikValue, parseRubrikNumber, parseLinkEntries, searchEntries, serializeLinkEntries, uploadMedia } from "@/app/lib/entries";
 import { parseIgsEntries, getIgsFieldValue } from "@/app/lib/igs";
 import type { AuthUser } from "@/app/lib/auth-types";
-import { useCompare } from "@/app/components/compare-context";
 
 type TextEntry = {
   title: string;
@@ -344,7 +343,6 @@ export default function ProductPage() {
   const params = useParams<{ id: string | string[] }>();
   const searchParams = useSearchParams();
   const rawId = params.id;
-  const { addTab, removeTab, isInCompare } = useCompare();
 
   const entryId = useMemo(() => {
     const value = Array.isArray(rawId) ? rawId[0] : rawId;
@@ -1512,34 +1510,6 @@ export default function ProductPage() {
                         {isFavorited ? "★" : "☆"}
                       </button>
                     )}
-                    {/* ── Compare button ── */}
-                    {entryId && (() => {
-                      const inCompare = isInCompare(entryId);
-                      return (
-                        <button
-                          type="button"
-                          className={`wiki-compare-btn${inCompare ? " active" : ""}`}
-                          onClick={() => {
-                            if (inCompare) {
-                              removeTab(entryId);
-                            } else {
-                              addTab(entryId, entry?.title);
-                            }
-                          }}
-                          title={inCompare ? "Remove from compare" : "Add to compare"}
-                          aria-label={inCompare ? "Remove from compare" : "Add to compare"}
-                          aria-pressed={inCompare}
-                        >
-                          <svg viewBox="0 0 20 20" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                            <rect x="2" y="2" width="7" height="7" rx="1" />
-                            <rect x="11" y="2" width="7" height="7" rx="1" />
-                            <rect x="2" y="11" width="7" height="7" rx="1" />
-                            <rect x="11" y="11" width="7" height="7" rx="1" />
-                          </svg>
-                          {inCompare ? "In compare" : "Compare"}
-                        </button>
-                      );
-                    })()}
                   </div>{/* end wiki-name-header-actions */}
                 </div>{/* end wiki-detail-name-shell */}
               </div>

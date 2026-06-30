@@ -8,53 +8,40 @@ import {
   useState,
 } from "react";
 
-export type Layout = "1x1" | "2x2";
-
-export type CompareTab = {
+export type TabEntry = {
   id: string;
   title?: string;
 };
 
-type CompareContextValue = {
-  tabs: CompareTab[];
-  layout: Layout;
+type TabsContextValue = {
+  tabs: TabEntry[];
   addTab: (id: string, title?: string) => void;
   removeTab: (id: string) => void;
-  setLayout: (layout: Layout) => void;
-  isInCompare: (id: string) => boolean;
-  activeTabIndex: number;
-  setActiveTabIndex: (index: number) => void;
+  updateTabTitle: (id: string, title: string) => void;
 };
 
-const CompareContext = createContext<CompareContextValue | null>(null);
-
-const STORAGE_TABS   = "compare-tabs";
-const STORAGE_LAYOUT = "compare-layout";
-const MAX_TABS = 4;
+const TabsContext = createContext<TabsContextValue | null>(null);
+const STORAGE_KEY = "wiki-tabs";
+const MAX_TABS = 8;
 
 export function CompareProvider({ children }: { children: React.ReactNode }) {
-  const [tabs,           setTabs]           = useState<CompareTab[]>([]);
-  const [layout,         setLayoutState]    = useState<Layout>("1x1");
-  const [activeTabIndex, setActiveTabIndex] = useState(0);
+  const [tabs, setTabs] = useState<TabEntry[]>([]);
 
   useEffect(() => {
     try {
-      const savedTabs = sessionStorage.getItem(STORAGE_TABS);
-      if (savedTabs) setTabs(JSON.parse(savedTabs) as CompareTab[]);
-      const savedLayout = sessionStorage.getItem(STORAGE_LAYOUT) as Layout | null;
-      if (savedLayout === "1x1" || savedLayout === "2x2") setLayoutState(savedLayout);
+      const saved = sessionStorage.getItem(STORAGE_KEY);
+      if (saved) setTabs(JSON.parse(saved) as TabEntry[]);
     } catch {}
   }, []);
 
-  const persist = (next: CompareTab[]) => {
-    try { sessionStorage.setItem(STORAGE_TABS, JSON.stringify(next)); } catch {}
+  const persist = (next: TabEntry[]) => {
+    try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch {}
   };
 
   const addTab = useCallback((id: string, title?: string) => {
     setTabs((prev) => {
       if (prev.some((t) => t.id === id)) return prev;
-      if (prev.length >= MAX_TABS) return prev;
-      const next = [...prev, { id, title }];
+      const next = [...prev, { id, title }].slice(-MAX_TABS);
       persist(next);
       return next;
     });
@@ -64,29 +51,27 @@ export function CompareProvider({ children }: { children: React.ReactNode }) {
     setTabs((prev) => {
       const next = prev.filter((t) => t.id !== id);
       persist(next);
-      setActiveTabIndex((i) => Math.min(i, Math.max(next.length - 1, 0)));
       return next;
     });
   }, []);
 
-  const setLayout = useCallback((l: Layout) => {
-    setLayoutState(l);
-    try { sessionStorage.setItem(STORAGE_LAYOUT, l); } catch {}
+  const updateTabTitle = useCallback((id: string, title: string) => {
+    setTabs((prev) => {
+      const next = prev.map((t) => (t.id === id ? { ...t, title } : t));
+      persist(next);
+      return next;
+    });
   }, []);
 
-  const isInCompare = useCallback((id: string) => tabs.some((t) => t.id === id), [tabs]);
-
   return (
-    <CompareContext.Provider
-      value={{ tabs, layout, addTab, removeTab, setLayout, isInCompare, activeTabIndex, setActiveTabIndex }}
-    >
+    <TabsContext.Provider value={{ tabs, addTab, removeTab, updateTabTitle }}>
       {children}
-    </CompareContext.Provider>
+    </TabsContext.Provider>
   );
 }
 
 export function useCompare() {
-  const ctx = useContext(CompareContext);
+  const ctx = useContext(TabsContext);
   if (!ctx) throw new Error("useCompare must be used within CompareProvider");
   return ctx;
 }
