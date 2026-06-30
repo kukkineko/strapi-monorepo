@@ -4,7 +4,7 @@ import "./globals.css";
 import { LanguageProvider } from "@/app/components/language-provider";
 import { AuthGate } from "@/app/components/auth-gate";
 import { CompareProvider } from "@/app/components/compare-context";
-import { TabBar } from "@/app/components/tab-bar";
+import { SplitPanes } from "@/app/components/tab-bar";
 import { translations } from "@/app/lib/i18n";
 
 export const metadata: Metadata = {
@@ -22,8 +22,12 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col">
         <LanguageProvider>
           <CompareProvider>
-            <Suspense><AuthGate>{children}</AuthGate></Suspense>
-            <TabBar />
+            <div className="wiki-split-row">
+              <div className="wiki-split-main">
+                <Suspense><AuthGate>{children}</AuthGate></Suspense>
+              </div>
+              <SplitPanes />
+            </div>
           </CompareProvider>
         </LanguageProvider>
       </body>

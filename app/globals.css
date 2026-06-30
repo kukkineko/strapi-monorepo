@@ -7015,206 +7015,86 @@ span.wiki-relations-list-title {
 
 
 
-/* ── Tab bar (sticky bottom) ────────────────────────────────────────────── */
 
-.wiki-tab-bar {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  z-index: 200;
+/* ── Split layout ───────────────────────────────────────────────────────── */
+
+.wiki-split-row {
   display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.42rem 0.85rem;
-  background: #1e2235;
-  border-top: 1px solid #2d3452;
-  box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.25);
-  min-height: 42px;
+  flex-direction: row;
+  flex: 1;
+  min-height: 100vh;
+  overflow: hidden;
 }
 
-.wiki-tab-bar--empty {
-  /* slim bar when no tabs open yet */
-  padding: 0.3rem 0.85rem;
-  min-height: 36px;
-}
-
-.wiki-tab-bar-tabs {
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
+.wiki-split-main {
   flex: 1;
   min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
+  overflow-y: auto;
+  height: 100vh;
 }
-.wiki-tab-bar-tabs::-webkit-scrollbar { display: none; }
 
-/* ── Tab pill ── */
+/* ── Split pane (iframe column) ─────────────────────────────────────────── */
 
-.wiki-tab-pill {
-  display: inline-flex;
-  align-items: stretch;
-  border-radius: 6px;
-  border: 1px solid #2d3452;
-  background: #252b40;
-  color: #c4cbe8;
-  font-size: 0.77rem;
-  white-space: nowrap;
-  max-width: 200px;
+.wiki-split-pane {
+  flex: 1;
+  min-width: 320px;
+  display: flex;
+  flex-direction: column;
+  border-left: 2px solid #cbd5e1;
+  position: relative;
+  height: 100vh;
+}
+
+.wiki-split-pane-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0.2rem 0.4rem;
+  background: #f1f5f9;
+  border-bottom: 1px solid #cbd5e1;
   flex-shrink: 0;
-  overflow: hidden;
-  transition: border-color 0.12s;
+  min-height: 28px;
 }
 
-.wiki-tab-pill.active {
-  border-color: #6366f1;
-  background: #2d2f55;
-}
-
-.wiki-tab-pill-label {
-  display: block;
-  padding: 0.3rem 0.55rem;
-  color: inherit;
-  font-size: inherit;
-  text-decoration: none;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 160px;
-}
-
-.wiki-tab-pill-label:hover { color: #a5b4fc; }
-
-.wiki-tab-pill-close {
-  padding: 0.28rem 0.38rem;
+.wiki-split-pane-close {
   background: none;
   border: none;
-  border-left: 1px solid #2d3452;
-  color: #475569;
-  cursor: pointer;
-  font-size: 1rem;
+  font-size: 1.2rem;
   line-height: 1;
-  flex-shrink: 0;
-  transition: color 0.1s;
-}
-.wiki-tab-pill-close:hover { color: #f87171; }
-
-/* ── New tab "+" button ── */
-
-.wiki-tab-new-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  padding: 0.28rem 0.6rem;
-  border-radius: 6px;
-  border: 1px dashed #3a4060;
-  background: transparent;
   color: #64748b;
-  font-size: 0.77rem;
   cursor: pointer;
-  flex-shrink: 0;
-  transition: border-color 0.12s, color 0.12s;
-}
-.wiki-tab-new-btn:hover {
-  border-color: #6366f1;
-  color: #a5b4fc;
-}
-
-/* ── Search popover (above the tab bar) ── */
-
-.wiki-tab-search-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 199;
-}
-
-.wiki-tab-search-popover {
-  position: fixed;
-  bottom: 48px;
-  left: 0.85rem;
-  z-index: 210;
-  width: min(420px, calc(100vw - 1.7rem));
-  background: #fff;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  box-shadow: 0 8px 30px rgba(0,0,0,0.18);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
-.wiki-tab-search-input {
-  width: 100%;
-  padding: 0.65rem 0.9rem;
-  border: none;
-  border-bottom: 1px solid #e2e8f0;
-  font-size: 0.9rem;
-  outline: none;
-  background: #fafafa;
-  box-sizing: border-box;
-}
-
-.wiki-tab-search-results {
-  max-height: 280px;
-  overflow-y: auto;
-}
-
-.wiki-tab-search-status {
-  padding: 0.65rem 0.9rem;
-  font-size: 0.82rem;
-  color: #94a3b8;
-  margin: 0;
-}
-
-.wiki-tab-search-item {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-  padding: 0.55rem 0.9rem;
-  text-decoration: none;
-  color: inherit;
-  transition: background 0.1s;
-}
-.wiki-tab-search-item:hover { background: #f1f5f9; }
-
-.wiki-tab-search-thumb {
-  width: 36px;
-  height: 36px;
-  flex-shrink: 0;
+  padding: 0 0.3rem;
   border-radius: 4px;
-  overflow: hidden;
-  background: #f1f5f9;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.6rem;
-  color: #94a3b8;
+  transition: color 0.1s, background 0.1s;
 }
-.wiki-tab-search-thumb img {
+
+.wiki-split-pane-close:hover {
+  color: #dc2626;
+  background: #fee2e2;
+}
+
+.wiki-split-pane-frame {
+  flex: 1;
   width: 100%;
-  height: 100%;
-  object-fit: cover;
+  border: none;
+  display: block;
 }
 
-.wiki-tab-search-text {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
-  min-width: 0;
-}
-.wiki-tab-search-text strong {
-  font-size: 0.84rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.wiki-tab-search-text span {
-  font-size: 0.75rem;
+/* ── New-tab button in topbar ───────────────────────────────────────────── */
+
+.wiki-topbar-split-btn {
+  border-style: dashed;
   color: #64748b;
+  flex-shrink: 0;
 }
 
-/* Extra bottom padding for page content above the tab bar */
+.wiki-topbar-split-btn:hover {
+  border-color: #6366f1;
+  color: #4f46e5;
+  background: #ede9fe;
+}
+
+/* Remove bottom padding added by old tab bar */
 .wiki-shell {
-  padding-bottom: 50px;
+  padding-bottom: 0;
 }

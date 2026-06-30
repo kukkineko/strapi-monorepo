@@ -1,77 +1,39 @@
 "use client";
 
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useState,
-} from "react";
+import { createContext, useCallback, useContext, useState } from "react";
 
-export type TabEntry = {
-  id: string;
-  title?: string;
+type Pane = { id: string };
+
+type SplitContextValue = {
+  panes: Pane[];
+  addPane: () => void;
+  removePane: (id: string) => void;
 };
 
-type TabsContextValue = {
-  tabs: TabEntry[];
-  addTab: (id: string, title?: string) => void;
-  removeTab: (id: string) => void;
-  updateTabTitle: (id: string, title: string) => void;
-};
+const SplitContext = createContext<SplitContextValue | null>(null);
 
-const TabsContext = createContext<TabsContextValue | null>(null);
-const STORAGE_KEY = "wiki-tabs";
-const MAX_TABS = 8;
+let counter = 1;
 
 export function CompareProvider({ children }: { children: React.ReactNode }) {
-  const [tabs, setTabs] = useState<TabEntry[]>([]);
+  const [panes, setPanes] = useState<Pane[]>([]);
 
-  useEffect(() => {
-    try {
-      const saved = sessionStorage.getItem(STORAGE_KEY);
-      if (saved) setTabs(JSON.parse(saved) as TabEntry[]);
-    } catch {}
+  const addPane = useCallback(() => {
+    setPanes((prev) => [...prev, { id: String(counter++) }]);
   }, []);
 
-  const persist = (next: TabEntry[]) => {
-    try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch {}
-  };
-
-  const addTab = useCallback((id: string, title?: string) => {
-    setTabs((prev) => {
-      if (prev.some((t) => t.id === id)) return prev;
-      const next = [...prev, { id, title }].slice(-MAX_TABS);
-      persist(next);
-      return next;
-    });
-  }, []);
-
-  const removeTab = useCallback((id: string) => {
-    setTabs((prev) => {
-      const next = prev.filter((t) => t.id !== id);
-      persist(next);
-      return next;
-    });
-  }, []);
-
-  const updateTabTitle = useCallback((id: string, title: string) => {
-    setTabs((prev) => {
-      const next = prev.map((t) => (t.id === id ? { ...t, title } : t));
-      persist(next);
-      return next;
-    });
+  const removePane = useCallback((id: string) => {
+    setPanes((prev) => prev.filter((p) => p.id !== id));
   }, []);
 
   return (
-    <TabsContext.Provider value={{ tabs, addTab, removeTab, updateTabTitle }}>
+    <SplitContext.Provider value={{ panes, addPane, removePane }}>
       {children}
-    </TabsContext.Provider>
+    </SplitContext.Provider>
   );
 }
 
-export function useCompare() {
-  const ctx = useContext(TabsContext);
-  if (!ctx) throw new Error("useCompare must be used within CompareProvider");
+export function useSplit() {
+  const ctx = useContext(SplitContext);
+  if (!ctx) throw new Error("useSplit must be used within CompareProvider");
   return ctx;
 }

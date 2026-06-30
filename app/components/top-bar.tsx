@@ -9,6 +9,7 @@ import { useLanguage } from "@/app/components/language-provider";
 import { UserPanel } from "@/app/components/user-panel";
 import { searchEntries, type Entry } from "@/app/lib/entries";
 import { HoverPreview, useHoverPreview } from "@/app/components/hover-preview";
+import { useSplit } from "@/app/components/compare-context";
 import {
   displayName as formatDisplayName,
   displayUsername,
@@ -34,7 +35,7 @@ import {
   TOPBAR_LOGO_WIDTH,
 } from "@/app/lib/topbar-icons";
 
-type TopBarAction = { href: string; label: string; primary?: boolean };
+type TopBarAction = { href: string; label: string; primary?: boolean; adminOnly?: boolean };
 type TopBarProps = { actions: TopBarAction[] };
 
 const SEARCH_HISTORY_KEY = "wiki-search-history";
@@ -93,10 +94,10 @@ function formatSearchPreviewMeta(entry: Entry): string {
 }
 
 function getUserDisplayLabel(user: AuthUser): string {
-  const name  = formatDisplayName(user.name);
-  if (name)   return name.split(" ")[0];
   const uname = displayUsername(user.username);
   if (uname)  return uname;
+  const name  = formatDisplayName(user.name);
+  if (name)   return name.split(" ")[0];
   return user.email.split("@")[0];
 }
 
@@ -194,6 +195,7 @@ export function TopBar({ actions }: TopBarProps) {
   const { t }    = useLanguage();
   const router   = useRouter();
   const pathname = usePathname();
+  const { addPane } = useSplit();
 
   /* auth */
   const [authUser,     setAuthUser]     = useState<AuthUser | null>(null);
@@ -360,7 +362,9 @@ export function TopBar({ actions }: TopBarProps) {
 
         {/* Action icons */}
         <div className="wiki-topbar-actions">
-          {actions.map((action) => (
+          {actions
+            .filter((action) => !action.adminOnly || authUser?.administrator)
+            .map((action) => (
             <Link
               key={`${action.href}-${action.label}`}
               href={action.href}
@@ -382,6 +386,21 @@ export function TopBar({ actions }: TopBarProps) {
               />
             </Link>
           ))}
+
+          {/* Split / new tab button */}
+          <button
+            type="button"
+            className="wiki-topbar-icon wiki-topbar-split-btn"
+            onClick={addPane}
+            aria-label="Open new tab"
+            title="Open new tab"
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="8" height="18" rx="1.5" />
+              <rect x="13" y="3" width="8" height="18" rx="1.5" />
+              <path d="M16 9h2M16 12h2M16 15h2" />
+            </svg>
+          </button>
         </div>
 
         {/* Search bar */}
