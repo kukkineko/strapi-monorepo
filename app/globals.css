@@ -7016,24 +7016,39 @@ span.wiki-relations-list-title {
 
 
 
+
 /* ── Split layout ───────────────────────────────────────────────────────── */
+
+/*
+ * Lock html+body to the viewport so each pane can scroll independently.
+ * Without this the body grows taller than 100vh and the split row has no
+ * fixed height to fill, making iframes render as small collapsed boxes.
+ */
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
 
 .wiki-split-row {
   display: flex;
   flex-direction: row;
   flex: 1;
-  min-height: 100vh;
+  height: 100%;   /* fill the body */
+  min-height: 0;  /* allow flex children to shrink below content size */
   overflow: hidden;
 }
 
+/* Main pane: the normal Next.js page, scrolls on its own */
 .wiki-split-main {
   flex: 1;
   min-width: 0;
+  height: 100%;
   overflow-y: auto;
-  height: 100vh;
+  overflow-x: hidden;
 }
 
-/* ── Split pane (iframe column) ─────────────────────────────────────────── */
+/* ── iframe pane ─────────────────────────────────────────────────────────── */
 
 .wiki-split-pane {
   flex: 1;
@@ -7041,8 +7056,8 @@ span.wiki-relations-list-title {
   display: flex;
   flex-direction: column;
   border-left: 2px solid #cbd5e1;
-  position: relative;
-  height: 100vh;
+  height: 100%;
+  min-height: 0;
 }
 
 .wiki-split-pane-bar {
@@ -7053,7 +7068,7 @@ span.wiki-relations-list-title {
   background: #f1f5f9;
   border-bottom: 1px solid #cbd5e1;
   flex-shrink: 0;
-  min-height: 28px;
+  height: 28px;
 }
 
 .wiki-split-pane-close {
@@ -7076,6 +7091,7 @@ span.wiki-relations-list-title {
 .wiki-split-pane-frame {
   flex: 1;
   width: 100%;
+  min-height: 0;
   border: none;
   display: block;
 }
@@ -7092,9 +7108,4 @@ span.wiki-relations-list-title {
   border-color: #6366f1;
   color: #4f46e5;
   background: #ede9fe;
-}
-
-/* Remove bottom padding added by old tab bar */
-.wiki-shell {
-  padding-bottom: 0;
 }

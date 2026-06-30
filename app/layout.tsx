@@ -19,7 +19,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="h-full antialiased">
-      <body className="min-h-full flex flex-col">
+      <body style={{ display: "flex", flexDirection: "column", height: "100%" }}>
         <LanguageProvider>
           <CompareProvider>
             <div className="wiki-split-row">
