@@ -1,18 +1,11 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Suspense } from "react";
 import "./globals.css";
 import { LanguageProvider } from "@/app/components/language-provider";
+import { AuthGate } from "@/app/components/auth-gate";
+import { CompareProvider } from "@/app/components/compare-context";
+import { TabBar } from "@/app/components/tab-bar";
 import { translations } from "@/app/lib/i18n";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
 
 export const metadata: Metadata = {
   title: translations.en.home.title,
@@ -25,12 +18,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
+    <html lang="en" className="h-full antialiased">
       <body className="min-h-full flex flex-col">
-        <LanguageProvider>{children}</LanguageProvider>
+        <LanguageProvider>
+          <CompareProvider>
+            <Suspense><AuthGate>{children}</AuthGate></Suspense>
+            <TabBar />
+          </CompareProvider>
+        </LanguageProvider>
       </body>
     </html>
   );

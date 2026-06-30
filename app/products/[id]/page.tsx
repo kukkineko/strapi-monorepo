@@ -12,9 +12,10 @@ import {
   SECTION_ADD_ICON_SIZE,
 } from "@/app/lib/topbar-icons";
 import type { Entry, EntryPayload, LinkEntry } from "@/app/lib/entries";
-import { getEntryById, getMediaById, listEntries, parseLinkEntries, searchEntries, serializeLinkEntries, uploadMedia } from "@/app/lib/entries";
+import { getEntryById, getMediaById, listEntries, normalizeRubrikValue, parseRubrikNumber, parseLinkEntries, searchEntries, serializeLinkEntries, uploadMedia } from "@/app/lib/entries";
 import { parseIgsEntries, getIgsFieldValue } from "@/app/lib/igs";
 import type { AuthUser } from "@/app/lib/auth-types";
+import { useCompare } from "@/app/components/compare-context";
 
 type TextEntry = {
   title: string;
@@ -121,6 +122,18 @@ function normalizeExternalLink(value?: string): string | null {
   return `https://${trimmed.replace(/^\/+/, "")}`;
 }
 
+/**
+ * Strapi media relations must be written as arrays of file IDs. The loaded
+ * Entry holds populated media objects, so map them down to their numeric ids —
+ * sending the full objects makes Strapi drop the relation (wiping the images).
+ */
+function toMediaIds(value: unknown): number[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value
+    .map((m) => (typeof m === "number" ? m : Number((m as { id?: unknown } | null)?.id)))
+    .filter((n): n is number => Number.isFinite(n) && n > 0);
+}
+
 function buildEntryPayload(entry: Entry, updates: Partial<EntryPayload> = {}): EntryPayload {
   return {
     title: entry.title,
@@ -133,8 +146,8 @@ function buildEntryPayload(entry: Entry, updates: Partial<EntryPayload> = {}): E
     issues: entry.issues,
     tickets: entry.tickets,
     igs: entry.igs,
-    pictures: entry.pictures as number[] | undefined,
-    miscFile: entry.miscFile as number[] | undefined,
+    pictures: toMediaIds(entry.pictures),
+    miscFile: toMediaIds(entry.miscFile),
     ...updates,
   };
 }
@@ -303,11 +316,35 @@ function buildGraphLayout(
   return positions;
 }
 
+/* ── Rubrik helpers ──────────────────────────────────────────────────────────── */
+
+const RUBRIK_OPTIONS = [
+  { value: "", label: "— (keine)" },
+  ...Array.from({ length: 15 }, (_, i) => {
+    const n = i + 1;
+    const code = `R${String(n).padStart(2, "0")}`;
+    return { value: code, label: code };
+  }),
+  { value: "replacements", label: "Ersatzteile" },
+  { value: "extra", label: "Extra" },
+];
+
+function displayRubrik(value: unknown): string {
+  if (value == null || (typeof value === "string" && !value.trim())) return "—";
+  const num = parseRubrikNumber(value);
+  if (num !== null) return `R${String(num).padStart(2, "0")}`;
+  const raw = normalizeRubrikValue(value).toLowerCase();
+  if (raw === "replacement" || raw === "replacements") return "Ers.";
+  if (raw === "extra" || raw === "extras") return "Ext.";
+  return normalizeRubrikValue(value).slice(0, 4) || "—";
+}
+
 export default function ProductPage() {
   const { t } = useLanguage();
   const params = useParams<{ id: string | string[] }>();
   const searchParams = useSearchParams();
   const rawId = params.id;
+  const { addTab, removeTab, isInCompare } = useCompare();
 
   const entryId = useMemo(() => {
     const value = Array.isArray(rawId) ? rawId[0] : rawId;
@@ -324,6 +361,8 @@ export default function ProductPage() {
   const [isFavorited, setIsFavorited] = useState(false);
   const [favLoading,  setFavLoading]  = useState(true);
   const [favSaving,   setFavSaving]   = useState(false);
+  const [rubrikEditing, setRubrikEditing] = useState(false);
+  const [rubrikSaving,  setRubrikSaving]  = useState(false);
   const [imageIndex, setImageIndex] = useState(0);
   const [showModal, setShowModal] = useState(false);
   const [failedImages, setFailedImages] = useState<Set<string>>(new Set());
@@ -333,7 +372,8 @@ export default function ProductPage() {
   const [isDraggingRelations, setIsDraggingRelations] = useState(false);
   const [lastDragPoint, setLastDragPoint] = useState<{ x: number; y: number } | null>(null);
   const [lastPinch, setLastPinch] = useState<{ dist: number } | null>(null);
-  const relSvgRef   = useRef<SVGSVGElement>(null);
+  const relSvgRef      = useRef<SVGSVGElement>(null);
+  const rubrikWrapRef  = useRef<HTMLDivElement>(null);
   const relTouchRef = useRef({
     onTouchStart: (_e: TouchEvent) => {},
     onTouchMove:  (_e: TouchEvent) => {},
@@ -364,6 +404,9 @@ export default function ProductPage() {
   const [issuePreviewIndex, setIssuePreviewIndex] = useState<number | null>(null);
   const [ticketPreviewIndex, setTicketPreviewIndex] = useState<number | null>(null);
   const [resolvedAttachmentMedia, setResolvedAttachmentMedia] = useState<Map<number, { id: number; name?: string; url: string }>>(new Map());
+  const [addingTag, setAddingTag] = useState(false);
+  const [newTag, setNewTag] = useState("");
+  const [savingTag, setSavingTag] = useState(false);
 
   const imageList = useMemo(() => entry?.pictureUrls ?? [], [entry?.pictureUrls]);
 
@@ -546,6 +589,41 @@ export default function ProductPage() {
       setFavSaving(false);
     }
   }
+
+  async function handleSetRubrik(value: string) {
+    if (!entry || !entryId || rubrikSaving) return;
+    setRubrikEditing(false);
+    setRubrikSaving(true);
+    try {
+      const fullPayload = buildEntryPayload(entry, { rubrik: value });
+      const res = await fetch(`/api/entries/${encodeURIComponent(entryId)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...fullPayload, _auditSection: "rubrik", _auditAction: "update" }),
+      });
+      if (res.ok) {
+        const updated = (await res.json()) as Entry;
+        setEntry(updated);
+      } else {
+        console.error("rubrik update failed", res.status, await res.text());
+      }
+    } catch (err) {
+      console.error("rubrik update error", err);
+    } finally {
+      setRubrikSaving(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!rubrikEditing) return;
+    function handleOutside(e: MouseEvent) {
+      if (rubrikWrapRef.current && !rubrikWrapRef.current.contains(e.target as Node)) {
+        setRubrikEditing(false);
+      }
+    }
+    document.addEventListener("mousedown", handleOutside);
+    return () => document.removeEventListener("mousedown", handleOutside);
+  }, [rubrikEditing]);
 
   useEffect(() => {
     async function loadLinkedEntries() {
@@ -1095,6 +1173,40 @@ export default function ProductPage() {
     }
   }
 
+  async function handleAddTag(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const value = newTag.trim();
+    if (!value || !entry || !entryId || savingTag) return;
+    // Ignore duplicates (case-insensitive).
+    if (tags.some((tag) => tag.toLowerCase() === value.toLowerCase())) {
+      setNewTag("");
+      return;
+    }
+
+    try {
+      setSavingTag(true);
+      const nextTags = [...tags, value];
+      const fullPayload = buildEntryPayload(entry, { tags: JSON.stringify(nextTags) });
+      const res = await fetch(`/api/entries/${encodeURIComponent(entryId)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...fullPayload, _auditSection: "tags", _auditAction: "update" }),
+      });
+      if (!res.ok) {
+        const data = (await res.json()) as { error?: string };
+        throw new Error(data.error ?? "Failed to add tag.");
+      }
+      const updated = (await res.json()) as Entry;
+      setEntry(updated);
+      setNewTag("");
+      // Keep the input open so several tags can be added in a row.
+    } catch (err) {
+      console.error("[handleAddTag] Failed to add tag:", err);
+    } finally {
+      setSavingTag(false);
+    }
+  }
+
   async function handleSectionSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -1253,8 +1365,8 @@ export default function ProductPage() {
         actions={[
           { href: fromList ?? "/products/all", label: t.nav.back },
           { href: "/", label: t.nav.home },
-          ...(entryId && authUser?.trusted
-            ? [{ href: `/products/${entryId}/edit`, label: t.nav.editThisPage }]
+          ...(entryId
+            ? [{ href: `/products/${entryId}/edit`, label: t.nav.editThisPage, adminOnly: true }]
             : []),
         ]}
       />
@@ -1271,25 +1383,34 @@ export default function ProductPage() {
           <>
             <div className="wiki-detail-grid">
               <div className="wiki-info-card wiki-detail-name">
+                <div className="wiki-detail-name-shell">
+                  <div className="wiki-detail-name-main">
                 <div className="wiki-name-header-row">
                   <span className="wiki-info-label">{t.listing.nameLabel}</span>
-                  {!favLoading && authUser && (
-                    <button
-                      type="button"
-                      className={`wiki-fav-button${isFavorited ? " active" : ""}`}
-                      onClick={() => void handleToggleFavorite()}
-                      disabled={favSaving}
-                      title={isFavorited ? "Remove from favourites" : "Add to favourites"}
-                      aria-label={isFavorited ? "Remove from favourites" : "Add to favourites"}
-                      aria-pressed={isFavorited}
-                    >
-                      {isFavorited ? "★" : "☆"}
-                    </button>
-                  )}
                 </div>
                 <span className="wiki-info-value wiki-info-value-name">{entry.title}</span>
                 <p>{entry.desc?.trim() ?? t.page.summaryFallback}</p>
-                <span className="wiki-info-label">{t.page.tags}</span>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                  <span className="wiki-info-label">{t.page.tags}</span>
+                  {authUser?.trusted && (
+                    <button
+                      type="button"
+                      className="wiki-section-trigger"
+                      onClick={() => setAddingTag((open) => !open)}
+                      aria-label={t.page.addTag}
+                      title={t.page.addTag}
+                    >
+                      <Image
+                        src={SECTION_ADD_ICON}
+                        alt=""
+                        aria-hidden="true"
+                        width={SECTION_ADD_ICON_SIZE}
+                        height={SECTION_ADD_ICON_SIZE}
+                        style={{ transform: `translateY(-${SECTION_ADD_ICON_OFFSET_Y}px)` }}
+                      />
+                    </button>
+                  )}
+                </div>
                 <div className="wiki-tags-wrap">
                   {tags.length > 0 ? (
                     tags.map((tag) => (
@@ -1298,9 +1419,129 @@ export default function ProductPage() {
                       </span>
                     ))
                   ) : (
-                    <span className="wiki-muted">{t.page.noTags}</span>
+                    !addingTag && <span className="wiki-muted">{t.page.noTags}</span>
+                  )}
+                  {addingTag && authUser?.trusted && (
+                    <form
+                      onSubmit={handleAddTag}
+                      style={{ display: "inline-flex", gap: "0.25rem", alignItems: "center" }}
+                    >
+                      <input
+                        type="text"
+                        value={newTag}
+                        onChange={(e) => setNewTag(e.target.value)}
+                        placeholder={t.page.newTagPlaceholder}
+                        autoFocus
+                        disabled={savingTag}
+                        style={{
+                          fontSize: "0.78rem",
+                          padding: "0.18rem 0.55rem",
+                          borderRadius: "999px",
+                          border: "1px solid #cbd5e1",
+                          minWidth: "96px",
+                        }}
+                      />
+                      <button
+                        type="submit"
+                        className="wiki-tag-pill"
+                        disabled={savingTag || !newTag.trim()}
+                        title={t.page.addTag}
+                        style={{ cursor: "pointer", border: "none" }}
+                      >
+                        {savingTag ? "…" : "✓"}
+                      </button>
+                    </form>
                   )}
                 </div>
+                  </div>{/* end wiki-detail-name-main */}
+                  <div className="wiki-name-header-actions">
+                    {/* ── Rubrik category badge ── */}
+                    <div className="wiki-rubrik-badge-wrap" ref={rubrikWrapRef}>
+                      {authUser?.trusted ? (
+                        <button
+                          type="button"
+                          className="wiki-rubrik-badge wiki-rubrik-badge--editable"
+                          onClick={() => setRubrikEditing((o) => !o)}
+                          title="Rubrik setzen"
+                          disabled={rubrikSaving}
+                        >
+                          <span className="wiki-rubrik-badge-label">Rubrik</span>
+                          {rubrikSaving ? "…" : displayRubrik(entry.rubrik)}
+                        </button>
+                      ) : (
+                        <span className="wiki-rubrik-badge">
+                          <span className="wiki-rubrik-badge-label">Rubrik</span>
+                          {displayRubrik(entry.rubrik)}
+                        </span>
+                      )}
+                      {rubrikEditing && !rubrikSaving && (
+                        <div className="wiki-rubrik-dropdown">
+                          {RUBRIK_OPTIONS.map((opt) => {
+                            const currentNum = parseRubrikNumber(entry.rubrik);
+                            const optNum     = parseRubrikNumber(opt.value);
+                            const isActive   = opt.value === ""
+                              ? !normalizeRubrikValue(entry.rubrik)
+                              : optNum !== null && currentNum !== null
+                                ? currentNum === optNum
+                                : normalizeRubrikValue(entry.rubrik).toLowerCase() === opt.value.toLowerCase();
+                            return (
+                              <button
+                                key={opt.value}
+                                type="button"
+                                className={`wiki-rubrik-option${isActive ? " active" : ""}`}
+                                onClick={() => void handleSetRubrik(opt.value)}
+                              >
+                                {opt.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                    {/* ── Favourite star button ── */}
+                    {!favLoading && authUser && (
+                      <button
+                        type="button"
+                        className={`wiki-fav-button${isFavorited ? " active" : ""}`}
+                        onClick={() => void handleToggleFavorite()}
+                        disabled={favSaving}
+                        title={isFavorited ? "Remove from favourites" : "Add to favourites"}
+                        aria-label={isFavorited ? "Remove from favourites" : "Add to favourites"}
+                        aria-pressed={isFavorited}
+                      >
+                        {isFavorited ? "★" : "☆"}
+                      </button>
+                    )}
+                    {/* ── Compare button ── */}
+                    {entryId && (() => {
+                      const inCompare = isInCompare(entryId);
+                      return (
+                        <button
+                          type="button"
+                          className={`wiki-compare-btn${inCompare ? " active" : ""}`}
+                          onClick={() => {
+                            if (inCompare) {
+                              removeTab(entryId);
+                            } else {
+                              addTab(entryId, entry?.title);
+                            }
+                          }}
+                          title={inCompare ? "Remove from compare" : "Add to compare"}
+                          aria-label={inCompare ? "Remove from compare" : "Add to compare"}
+                          aria-pressed={inCompare}
+                        >
+                          <svg viewBox="0 0 20 20" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                            <rect x="2" y="2" width="7" height="7" rx="1" />
+                            <rect x="11" y="2" width="7" height="7" rx="1" />
+                            <rect x="2" y="11" width="7" height="7" rx="1" />
+                            <rect x="11" y="11" width="7" height="7" rx="1" />
+                          </svg>
+                          {inCompare ? "In compare" : "Compare"}
+                        </button>
+                      );
+                    })()}
+                  </div>{/* end wiki-name-header-actions */}
+                </div>{/* end wiki-detail-name-shell */}
               </div>
 
               <div className="wiki-info-card wiki-detail-meta">
@@ -1524,6 +1765,20 @@ export default function ProductPage() {
                 <div className="wiki-section-header">
                   <h2 className="wiki-links-heading">{t.page.links}</h2>
                   <div className="wiki-section-header-actions">
+                    {linkEntries.length > 0 && (
+                      <button
+                        type="button"
+                        className="wiki-section-trigger wiki-links-expand-btn"
+                        onClick={openRelationsGraph}
+                        aria-label="View all relations"
+                        title="View all relations"
+                      >
+                        <svg viewBox="0 0 20 20" aria-hidden="true" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M3 7V3h4M17 7V3h-4M3 13v4h4M17 13v4h-4" />
+                          <rect x="6" y="6" width="8" height="8" rx="1" />
+                        </svg>
+                      </button>
+                    )}
                     {authUser?.trusted && (
                     <button
                       type="button"
@@ -1572,6 +1827,8 @@ export default function ProductPage() {
                             <div className="wiki-link-text">
                               <strong>{linkedEntry?.title ?? value}</strong>
                               <span>{linkedEntry?.artNr ?? (linkedEntry?.documentId ?? value)}</span>
+                            </div>
+                            <div className="wiki-link-badges">
                               {linkEntry.confidence !== undefined && (
                                 <span className="wiki-relation-confidence">{Math.round(linkEntry.confidence * 100)}%</span>
                               )}
@@ -2352,7 +2609,7 @@ export default function ProductPage() {
           <div
             className="wiki-modal-overlay"
             onClick={closeRelationsGraph}
-            onWheel={(event) => event.preventDefault()}
+            onWheel={(event) => { if (relationsView === "graph") event.preventDefault(); }}
             role="dialog"
             aria-modal="true"
             aria-labelledby="relations-dialog-title"
