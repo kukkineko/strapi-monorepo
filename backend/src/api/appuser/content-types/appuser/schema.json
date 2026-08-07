@@ -1,0 +1,61 @@
+{
+  "kind": "collectionType",
+  "collectionName": "appusers",
+  "info": {
+    "singularName": "appuser",
+    "pluralName": "appusers",
+    "displayName": "AppUser",
+    "description": "Single application user: identity, profile, roles, favorites and audit log. Authenticated via the custom /api/app-auth endpoints."
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "username": {
+      "type": "string",
+      "required": true,
+      "unique": true,
+      "minLength": 2
+    },
+    "email": {
+      "type": "email",
+      "required": true,
+      "unique": true
+    },
+    "password": {
+      "type": "password",
+      "private": true,
+      "minLength": 6
+    },
+    "firstName": {
+      "type": "string"
+    },
+    "lastName": {
+      "type": "string"
+    },
+    "company": {
+      "type": "string"
+    },
+    "roles": {
+      "type": "json"
+    },
+    "favorites": {
+      "type": "json"
+    },
+    "lists": {
+      "type": "json"
+    },
+    "auditLog": {
+      "type": "json"
+    },
+    "confirmed": {
+      "type": "boolean",
+      "default": false
+    },
+    "blocked": {
+      "type": "boolean",
+      "default": false
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "name": "strapifrontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "start:prod": "NODE_OPTIONS=--max-old-space-size=4096 next start",
+    "start:cluster": "npm run build && npx pm2 start pm2.config.js",
+    "stop:cluster": "npx pm2 stop strapifrontend",
+    "logs": "npx pm2 logs strapifrontend",
+    "start:dev": "npm run build && npx pm2 start pm2.dev.config.js",
+    "stop:dev": "npx pm2 stop strapifrontend-dev",
+    "logs:dev": "npx pm2 logs strapifrontend-dev",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "next": "^16.2.10",
+    "pdfjs-dist": "^5.7.284",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "sharp": "^0.35.3"
+  },
+  "engines": {
+    "node": ">=20.0.0 <=24.x.x"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.4",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}

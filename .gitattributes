@@ -1,0 +1,18 @@
+# Normalize line endings to LF in the repo so the code deploys cleanly on Linux,
+# regardless of the OS it was committed from.
+* text=eol=lf
+
+# Shell scripts must be LF or they break on Linux.
+*.sh text eol=lf
+
+# Treat these as binary (never touch line endings).
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.tiff binary
+*.pdf binary
+*.woff binary
+*.woff2 binary

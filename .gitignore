@@ -1,0 +1,63 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Root safety-net ignore for the monorepo. Each package (frontend/, backend/)
+# also has its own .gitignore. Anything data- or secret-shaped is excluded here
+# so it can never be committed by accident.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Secrets / environment
+.env
+.env.*
+!.env.example
+*.local
+*.pem
+*.key
+
+# Dependencies
+node_modules/
+.pnp
+.pnp.*
+
+# Build output
+.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+next-env.d.ts
+
+# Strapi runtime / build
+.strapi/
+.strapi-updater.json
+.strapi-cloud.json
+.cache/
+.tmp/
+backend/types/generated/
+
+# Actual data — never commit (transfer via the data export instead)
+**/public/uploads/*
+!**/public/uploads/.gitkeep
+*.sql
+*.sqlite
+*.sqlite3
+*.db
+*.dump
+data-export/
+strapiimport/
+
+# Python tooling (local import scripts)
+.venv/
+__pycache__/
+*.pyc
+
+# Logs & misc
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
+Thumbs.db
+
+# Editor / tooling
+.idea/
+.vscode/
+.claude/
