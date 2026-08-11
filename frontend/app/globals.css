@@ -1324,6 +1324,25 @@ a:hover {
   min-width: 0;
 }
 
+/* Below desktop the section panels stack and the IGS panel goes full-width.
+   Collapse its inner rows so the Bezeichnung/DSU pairs stop sitting 2-per-line
+   (and the small Kurztext/Land/Auslauf/Rubrik row stops at 4-per-line). Pairs
+   become one-per-line; the tiny quad row is 2×2 on tablets, single on phones. */
+@media (max-width: 1080px) {
+  .wiki-igs-pair-row { grid-template-columns: 1fr; }
+  .wiki-igs-quad-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@container split-main (max-width: 1080px) {
+  .wiki-igs-pair-row { grid-template-columns: 1fr; }
+  .wiki-igs-quad-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  .wiki-igs-quad-row { grid-template-columns: 1fr; }
+}
+@container split-main (max-width: 600px) {
+  .wiki-igs-quad-row { grid-template-columns: 1fr; }
+}
+
 .wiki-media-panel h2 {
   margin: 0 0 0.8rem;
   font-size: 1.12rem;
@@ -1488,6 +1507,45 @@ a:hover {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 1rem;
   margin-top: 1rem;
+}
+
+/* Below desktop (tablet / landscape phone / narrow split pane), stack the
+   section panels into a single column so they never sit squeezed side-by-side.
+   3 columns are kept only on true desktop (>1080px). Panels size to their
+   content here instead of being locked in a 220px internal-scroll box. */
+@media (max-width: 1080px) {
+  .wiki-lower-grid {
+    display: flex;
+    flex-direction: column;
+  }
+  .wiki-lower-grid > .wiki-panel {
+    height: auto;
+    min-height: 120px;
+    max-height: 60vh;
+  }
+  .wiki-lower-grid .wiki-list-cards {
+    grid-template-columns: 1fr;
+  }
+  .wiki-list-cards {
+    grid-template-columns: 1fr;
+  }
+}
+@container split-main (max-width: 1080px) {
+  .wiki-lower-grid {
+    display: flex;
+    flex-direction: column;
+  }
+  .wiki-lower-grid > .wiki-panel {
+    height: auto;
+    min-height: 120px;
+    max-height: 60vh;
+  }
+  .wiki-lower-grid .wiki-list-cards {
+    grid-template-columns: 1fr;
+  }
+  .wiki-list-cards {
+    grid-template-columns: 1fr;
+  }
 }
 
 .wiki-lower-grid > .wiki-panel {
@@ -5400,11 +5458,17 @@ a:hover {
   }
 
   .wiki-lower-grid {
-    grid-template-columns: 1fr;
+    display: flex;
+    flex-direction: column;
   }
 
+  /* Stacked on narrow screens: let each section size to its content instead of
+     being locked into a 220px internal-scroll box (which felt cramped/buggy on
+     mobile). Long lists still cap out and scroll via max-height. */
   .wiki-lower-grid > .wiki-panel {
-    height: 220px;
+    height: auto;
+    min-height: 120px;
+    max-height: 60vh;
   }
 
   .wiki-lower-grid .wiki-list-cards {
@@ -5637,11 +5701,15 @@ a:hover {
   }
 
   .wiki-lower-grid {
-    grid-template-columns: 1fr;
+    display: flex;
+    flex-direction: column;
   }
 
+  /* Mirror of the @media rule above (see note there) for the narrow split pane. */
   .wiki-lower-grid > .wiki-panel {
-    height: 220px;
+    height: auto;
+    min-height: 120px;
+    max-height: 60vh;
   }
 
   .wiki-lower-grid .wiki-list-cards {
@@ -5945,18 +6013,39 @@ a:hover {
     gap: 0.4rem;
   }
 
+  /* On phones the side tag column stole ~40% of the card width and clipped the
+     product name. Drop it to a full-width row under the name so the title gets
+     the whole line; tags sit below it, small and clipped to one row. */
   .wiki-product-card {
-    grid-template-columns: 56px 1fr auto;
-  }
-
-  .wiki-product-tags-col {
-    max-width: 120px;
-    min-width: 56px;
+    grid-template-columns: 56px 1fr;
+    grid-auto-rows: auto;
   }
 
   .wiki-product-thumb {
+    grid-column: 1;
+    grid-row: 1;
     width: 56px;
     height: 64px;
+  }
+
+  .wiki-product-info {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .wiki-product-tags-col {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-start;
+    min-width: 0;
+    max-width: none;
+    gap: 0.3rem;
+    padding: 0.35rem 0.7rem;
+    border-left: none;
+    border-top: 1px solid var(--line-soft);
   }
 
   .wiki-product-skeleton {
