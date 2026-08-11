@@ -58,6 +58,27 @@ Frontend: <http://localhost:3000> · Strapi admin: <http://localhost:1337/admin>
 See **[DEPLOYMENT.md](DEPLOYMENT.md)** for the full step-by-step Linux VPS guide
 (PostgreSQL, PM2, nginx, data restore).
 
+## Day-to-day workflow (dev in WSL → GitHub → VPS)
+
+Local development runs inside **Ubuntu WSL**, parallel to the production VPS. This
+repo is the single source of truth — changes flow to production through GitHub.
+
+1. **Edit** in `~/strapi-monorepo/frontend`. Run `npm run dev` (hot reload); it
+   reads the local Strapi backend on `localhost:1337`.
+2. **Publish** to GitHub:
+   ```bash
+   git add -A && git commit -m "describe the change" && git push
+   ```
+3. **Deploy** on the VPS (see [DEPLOYMENT.md](DEPLOYMENT.md) → *Updating a running
+   deployment*):
+   ```bash
+   cd /var/www/app && git pull
+   cd frontend && npm ci && npm run build && pm2 reload strapifrontend
+   ```
+
+`.env.local` (frontend) and `.env` (backend) hold secrets, are git-ignored, and
+never travel through this loop — set them once per environment.
+
 ## Requirements
 
 - Node.js 20.x (see `.nvmrc`)
