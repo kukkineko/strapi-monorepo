@@ -12,9 +12,9 @@ import {
   SECTION_ADD_ICON_OFFSET_Y,
   SECTION_ADD_ICON_SIZE,
 } from "@/app/lib/topbar-icons";
-import type { Entry, EntryPayload, LinkEntry } from "@/app/lib/entries";
-import { getEntryById, getMediaById, listEntries, normalizeRubrikValue, parseRubrikNumber, parseRubrikNumbers, parseLinkEntries, searchEntries, serializeLinkEntries, uploadMedia } from "@/app/lib/entries";
-import { parseIgsEntries, getIgsFieldValue } from "@/app/lib/igs";
+import type { Entry, EntryMedia, EntryNeighbors, EntryPayload, LinkEntry } from "@/app/lib/entries";
+import { getArtNrNeighbors, getEntryById, getMediaById, listEntries, normalizeRubrikValue, parseRubrikNumber, parseRubrikNumbers, parseLinkEntries, searchEntries, serializeLinkEntries, uploadMedia } from "@/app/lib/entries";
+import { parseIgsEntries, getIgsFieldValue, setIgsFieldValue } from "@/app/lib/igs";
 import type { AuthUser } from "@/app/lib/auth-types";
 
 type TextEntry = {
@@ -42,6 +42,12 @@ const REL_NODE_RADIUS = 92;
 const REL_NODE_DIAMETER = REL_NODE_RADIUS * 2;
 const REL_MIN_NODE_DISTANCE = REL_NODE_DIAMETER * 2.5;
 const REL_LAYOUT_PADDING = 180;
+
+/* ── artNr neighbours window ── */
+const NEIGHBOR_RANGE_MIN = 1;
+const NEIGHBOR_RANGE_MAX = 20;
+const NEIGHBOR_RANGE_DEFAULT = 3;
+const NEIGHBOR_RANGE_KEY = "wiki-variants-range";
 
 type SectionType = "issues" | "docs" | "links" | "tickets";
 
@@ -154,6 +160,42 @@ function buildEntryPayload(entry: Entry, updates: Partial<EntryPayload> = {}): E
 
 function isImageAttachment(value: string): boolean {
   return /\.(png|jpe?g|webp|gif|bmp|svg|tiff?)(\?|#|$)/i.test(value);
+}
+
+function isPdfAttachment(value: string): boolean {
+  return /\.pdf(\?|#|$)/i.test(value);
+}
+
+/** Uppercase file extension for display, or "—" when none can be derived. */
+function fileTypeLabel(value: string): string {
+  const clean = value.split(/[?#]/)[0] ?? value;
+  const match = clean.match(/\.([a-z0-9]+)$/i);
+  return match ? match[1]!.toUpperCase() : "—";
+}
+
+/**
+ * Inline preview for a document attachment: images render directly, PDFs embed
+ * in an iframe, everything else falls back to a download prompt.
+ */
+function renderDocPreviewPane(media: EntryMedia, fallbackText: string) {
+  if (isImageAttachment(media.url)) {
+    return <img className="wiki-doc-viewer-image" src={media.url} alt={media.name ?? ""} />;
+  }
+  if (isPdfAttachment(media.url)) {
+    return (
+      <iframe className="wiki-doc-viewer-frame" src={media.url} title={media.name ?? "PDF"} />
+    );
+  }
+  return (
+    <div className="wiki-doc-viewer-fallback">
+      <svg viewBox="0 0 24 24" width="52" height="52" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+        <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+        <path d="M14 3v5h5" />
+      </svg>
+      <p className="wiki-doc-viewer-fallback-name">{media.name ?? "Document"}</p>
+      <p className="wiki-muted">{fallbackText}</p>
+    </div>
+  );
 }
 
 function edgeKey(source: string, target: string): string {
@@ -372,6 +414,16 @@ export default function ProductPage() {
   const [rubrikSaving,  setRubrikSaving]  = useState(false);
   const [imageIndex, setImageIndex] = useState(0);
   const [showModal, setShowModal] = useState(false);
+  const [neighborRange, setNeighborRange] = useState<number>(() => {
+    if (typeof window === "undefined") return NEIGHBOR_RANGE_DEFAULT;
+    const saved = Number(window.localStorage.getItem(NEIGHBOR_RANGE_KEY));
+    if (!Number.isFinite(saved)) return NEIGHBOR_RANGE_DEFAULT;
+    return Math.min(NEIGHBOR_RANGE_MAX, Math.max(NEIGHBOR_RANGE_MIN, Math.round(saved)));
+  });
+  const [neighbors, setNeighbors] = useState<EntryNeighbors>({ before: [], after: [] });
+  const [neighborsLoading, setNeighborsLoading] = useState(false);
+  const variantsTrackRef = useRef<HTMLDivElement>(null);
+  const variantsCurrentRef = useRef<HTMLDivElement>(null);
   const [failedImages, setFailedImages] = useState<Set<string>>(new Set());
   const [showRelationsGraph, setShowRelationsGraph] = useState(false);
   const [relationsZoom, setRelationsZoom] = useState(1);
@@ -381,6 +433,9 @@ export default function ProductPage() {
   const [lastPinch, setLastPinch] = useState<{ dist: number } | null>(null);
   const relSvgRef      = useRef<SVGSVGElement>(null);
   const rubrikWrapRef  = useRef<HTMLDivElement>(null);
+  /* documentIds whose view we've already counted this mount — guards against
+     double-counting from re-renders and React StrictMode's double effect. */
+  const viewedRef      = useRef<Set<string>>(new Set());
   const relTouchRef = useRef({
     onTouchStart: (_e: TouchEvent) => {},
     onTouchMove:  (_e: TouchEvent) => {},
@@ -408,7 +463,9 @@ export default function ProductPage() {
   const [relationsView, setRelationsView] = useState<"list" | "graph">("list");
   const [selectedRelationIndex, setSelectedRelationIndex] = useState<number | null>(null);
   const [docPreviewIndex, setDocPreviewIndex] = useState<number | null>(null);
+  const [docPreviewAttachment, setDocPreviewAttachment] = useState(0);
   const [issuePreviewIndex, setIssuePreviewIndex] = useState<number | null>(null);
+  const [inheritedIssuePreviewIndex, setInheritedIssuePreviewIndex] = useState<number | null>(null);
   const [ticketPreviewIndex, setTicketPreviewIndex] = useState<number | null>(null);
   const [resolvedAttachmentMedia, setResolvedAttachmentMedia] = useState<Map<number, { id: number; name?: string; url: string }>>(new Map());
   const [addingTag, setAddingTag] = useState(false);
@@ -444,6 +501,47 @@ export default function ProductPage() {
   const docsEntries = useMemo(() => parseTextEntries(entry?.docs), [entry?.docs]);
   const ticketsEntries = useMemo(() => parseTextEntries(entry?.tickets), [entry?.tickets]);
   const linkEntries = useMemo(() => parseLinkEntries(entry?.links), [entry?.links]);
+
+  /* ── Inherited problems ──────────────────────────────────────────────────
+     A problem on a product should surface on the products directly linked to
+     it. We only look at the products this entry links to (linkedEntriesLookup
+     already holds their full data, issues included) — never transitively — so
+     a problem travels exactly one hop along the relation chain. Because links
+     are stored bidirectionally, this covers both the "up" and "down" direction
+     of a chain. These entries are read-only here; they belong to their source
+     product and are edited there. */
+  const inheritedIssues = useMemo(() => {
+    if (!entry) return [];
+    const currentId = entry.documentId;
+    const seenSources = new Set<string>();
+    const result: Array<{
+      key: string;
+      issue: TextEntry;
+      sourceId: string;
+      sourceTitle: string;
+      sourceArtNr?: string;
+    }> = [];
+
+    for (const link of linkEntries) {
+      const source = linkedEntriesLookup.get(link.id);
+      if (!source || source.documentId === currentId) continue;
+      if (seenSources.has(source.documentId)) continue;
+      seenSources.add(source.documentId);
+
+      parseTextEntries(source.issues).forEach((issue, idx) => {
+        result.push({
+          key: `${source.documentId}-${idx}`,
+          issue,
+          sourceId: source.documentId,
+          sourceTitle: source.title,
+          sourceArtNr: source.artNr,
+        });
+      });
+    }
+
+    return result;
+  }, [entry, linkEntries, linkedEntriesLookup]);
+
   const igsStructured = useMemo(() => {
     const raw = entry?.igs;
     if (!raw?.trim()) return null;
@@ -501,7 +599,7 @@ export default function ProductPage() {
 
   useEffect(() => {
     async function resolveMissingAttachmentMedia() {
-      const allSections = [...issues, ...docsEntries, ...ticketsEntries];
+      const allSections = [...issues, ...docsEntries, ...ticketsEntries, ...inheritedIssues.map((i) => i.issue)];
       const ids = Array.from(
         new Set(
           allSections
@@ -532,7 +630,7 @@ export default function ProductPage() {
     }
 
     void resolveMissingAttachmentMedia();
-  }, [issues, docsEntries, ticketsEntries, miscFileById, resolvedAttachmentMedia]);
+  }, [issues, docsEntries, ticketsEntries, inheritedIssues, miscFileById, resolvedAttachmentMedia]);
 
   useEffect(() => {
     async function loadEntry() {
@@ -556,6 +654,118 @@ export default function ProductPage() {
 
     void loadEntry();
   }, [entryId, t.page.failedToLoadPage, t.page.invalidPageId]);
+
+  /* ── Record a page view once the entry has loaded ────────────────────────
+     Fires one increment per documentId per mount. Keyed on the resolved
+     documentId (not the URL param, which may be a numeric id) so the counter
+     store is consistent with what the admin Page Views tab joins against.
+     Fire-and-forget: a failed view write must never disturb the page. */
+  useEffect(() => {
+    const docId = entry?.documentId;
+    if (!docId || viewedRef.current.has(docId)) return;
+    viewedRef.current.add(docId);
+    void fetch(`/api/entries/${encodeURIComponent(docId)}/view`, {
+      method: "POST",
+      keepalive: true,
+    }).catch(() => {});
+  }, [entry?.documentId]);
+
+  /* ── artNr neighbours (variants & replacement parts) ── */
+  useEffect(() => {
+    const artNr = entry?.artNr?.trim();
+    if (!artNr) {
+      setNeighbors({ before: [], after: [] });
+      setNeighborsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setNeighborsLoading(true);
+
+    void getArtNrNeighbors(artNr, neighborRange)
+      .then((result) => {
+        if (!cancelled) setNeighbors(result);
+      })
+      .catch(() => {
+        if (!cancelled) setNeighbors({ before: [], after: [] });
+      })
+      .finally(() => {
+        if (!cancelled) setNeighborsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [entry?.artNr, neighborRange]);
+
+  /* Keep the current item centred in the horizontal variants strip. */
+  useEffect(() => {
+    const track = variantsTrackRef.current;
+    const current = variantsCurrentRef.current;
+    if (!track || !current) return;
+    track.scrollLeft = current.offsetLeft - track.clientWidth / 2 + current.clientWidth / 2;
+  }, [neighbors, entry?.documentId]);
+
+  /* Mouse-wheel over the strip scrolls it horizontally. Uses a native
+     non-passive listener so we can preventDefault the vertical page scroll. */
+  useEffect(() => {
+    const track = variantsTrackRef.current;
+    if (!track) return;
+    const onWheel = (e: WheelEvent) => {
+      if (track.scrollWidth <= track.clientWidth) return;
+      const delta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+      if (!delta) return;
+      e.preventDefault();
+      track.scrollLeft += delta;
+    };
+    track.addEventListener("wheel", onWheel, { passive: false });
+    return () => track.removeEventListener("wheel", onWheel);
+  }, [entry?.artNr]);
+
+  /* Persist the chosen range so it survives reloads. */
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(NEIGHBOR_RANGE_KEY, String(neighborRange));
+    }
+  }, [neighborRange]);
+
+  /* Reset to the first attachment whenever a different document opens. */
+  useEffect(() => {
+    setDocPreviewAttachment(0);
+  }, [docPreviewIndex]);
+
+  function renderVariantThumb(url?: string) {
+    if (url && !failedImages.has(url)) {
+      return (
+        <img
+          src={url}
+          alt=""
+          loading="lazy"
+          onError={() => setFailedImages((prev) => new Set([...prev, url]))}
+        />
+      );
+    }
+    return <span className="wiki-variant-thumb-empty" aria-hidden="true" />;
+  }
+
+  function variantInfo(item: Entry): string | null {
+    const desc = item.desc?.trim();
+    if (desc) return desc;
+    if (item.EAN?.trim()) return `EAN ${item.EAN.trim()}`;
+    return null;
+  }
+
+  function renderVariantCard(item: Entry) {
+    const info = variantInfo(item);
+    return (
+      <Link key={item.documentId} href={`/products/${item.documentId}`} className="wiki-variant-card">
+        <span className="wiki-variant-card-thumb">{renderVariantThumb(item.pictureUrls?.[0])}</span>
+        <span className="wiki-variant-card-artnr">{item.artNr ?? "—"}</span>
+        <span className="wiki-variant-card-title">{item.title}</span>
+        {info && <span className="wiki-variant-card-info">{info}</span>}
+      </Link>
+    );
+  }
 
   /* ── auth + favourites ── */
   useEffect(() => {
@@ -618,7 +828,18 @@ export default function ProductPage() {
     }
     setRubrikSaving(true);
     try {
-      const fullPayload = buildEntryPayload(entry, { rubrik: nextRubriks });
+      // Mirror the rubrik into the IGS blob so the IGS view reflects the change.
+      // Use the friendly labels (R01…, Ers., Ext.), or "N.K." when uncategorized.
+      // setIgsFieldValue returns null when there is no IGS data, leaving it untouched.
+      const rubrikText =
+        nextRubriks.length === 0
+          ? "N.K. (Nicht kategorisiert)"
+          : nextRubriks.map(displaySingleRubrik).join(", ");
+      const nextIgs = setIgsFieldValue(entry.igs, "Rubrik", rubrikText);
+      const fullPayload = buildEntryPayload(entry, {
+        rubrik: nextRubriks,
+        ...(nextIgs !== null ? { igs: nextIgs } : {}),
+      });
       const res = await fetch(`/api/entries/${encodeURIComponent(entryId)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -1432,7 +1653,16 @@ export default function ProductPage() {
                   <span className="wiki-info-label">{t.listing.nameLabel}</span>
                 </div>
                 <span className="wiki-info-value wiki-info-value-name">{entry.title}</span>
-                <p>{entry.desc?.trim() ?? t.page.summaryFallback}</p>
+                <div className="wiki-name-meta-row">
+                  <div className="wiki-info-field compact">
+                    <span className="wiki-info-label">{t.page.artNr}</span>
+                    <span className="wiki-info-value" title={entry.artNr ?? "-"}>{entry.artNr ?? "-"}</span>
+                  </div>
+                  <div className="wiki-info-field compact">
+                    <span className="wiki-info-label">{t.page.ean}</span>
+                    <span className="wiki-info-value" title={entry.EAN ?? "-"}>{entry.EAN ?? "-"}</span>
+                  </div>
+                </div>
                 <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
                   <span className="wiki-info-label">{t.page.tags}</span>
                   {authUser?.trusted && (
@@ -1563,24 +1793,6 @@ export default function ProductPage() {
                 </div>{/* end wiki-detail-name-shell */}
               </div>
 
-              <div className="wiki-info-card wiki-detail-meta">
-                <div className="wiki-info-row">
-                  <div className="wiki-info-field compact">
-                    <span className="wiki-info-label">{t.page.artNr}</span>
-                    <span className="wiki-info-value" title={entry.artNr ?? "-"}>
-                      {entry.artNr ?? "-"}
-                    </span>
-                  </div>
-
-                  <div className="wiki-info-field compact">
-                    <span className="wiki-info-label">{t.page.ean}</span>
-                    <span className="wiki-info-value" title={entry.EAN ?? "-"}>
-                      {entry.EAN ?? "-"}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
               <div className="wiki-panel wiki-detail-summary">
                 <h2>{t.page.summary}</h2>
                 <p>{entry.desc?.trim() || t.page.summaryShortFallback}</p>
@@ -1657,6 +1869,77 @@ export default function ProductPage() {
 
             </div>
 
+            <section className="wiki-panel wiki-variants-panel">
+              <div className="wiki-variants-header">
+                <div className="wiki-variants-heading">
+                  <h2>{t.page.variants}</h2>
+                </div>
+                <div className="wiki-variants-stepper" role="group" aria-label={t.page.variantsRange}>
+                  <span className="wiki-variants-stepper-label">{t.page.variantsRange}</span>
+                  <button
+                    type="button"
+                    className="wiki-variants-stepper-btn"
+                    onClick={() => setNeighborRange((n) => Math.max(NEIGHBOR_RANGE_MIN, n - 1))}
+                    disabled={neighborRange <= NEIGHBOR_RANGE_MIN}
+                    aria-label={t.page.variantsFewer}
+                    title={t.page.variantsFewer}
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true" className="wiki-variants-stepper-icon">
+                      <path d="M14.5 5L8.5 12L14.5 19" />
+                    </svg>
+                  </button>
+                  <span className="wiki-variants-stepper-value" aria-live="polite">{neighborRange}</span>
+                  <button
+                    type="button"
+                    className="wiki-variants-stepper-btn"
+                    onClick={() => setNeighborRange((n) => Math.min(NEIGHBOR_RANGE_MAX, n + 1))}
+                    disabled={neighborRange >= NEIGHBOR_RANGE_MAX}
+                    aria-label={t.page.variantsMore}
+                    title={t.page.variantsMore}
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true" className="wiki-variants-stepper-icon">
+                      <path d="M9.5 5L15.5 12L9.5 19" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              {!entry.artNr?.trim() ? (
+                <p className="wiki-muted">{t.page.variantsNoArtNr}</p>
+              ) : (
+                <div
+                  className={`wiki-variants-track${neighborsLoading ? " is-loading" : ""}`}
+                  ref={variantsTrackRef}
+                >
+                    {neighbors.before.map(renderVariantCard)}
+
+                    <div
+                      ref={variantsCurrentRef}
+                      className="wiki-variant-card wiki-variant-card--current"
+                      aria-current="true"
+                    >
+                      <span className="wiki-variant-card-badge">{t.page.variantsCurrent}</span>
+                      <span className="wiki-variant-card-thumb">
+                        {renderVariantThumb(entry.pictureUrls?.[0])}
+                      </span>
+                      <span className="wiki-variant-card-artnr">{entry.artNr}</span>
+                      <span className="wiki-variant-card-title">{entry.title}</span>
+                      {variantInfo(entry) && (
+                        <span className="wiki-variant-card-info">{variantInfo(entry)}</span>
+                      )}
+                    </div>
+
+                    {neighbors.after.map(renderVariantCard)}
+
+                    {!neighborsLoading &&
+                      neighbors.before.length === 0 &&
+                      neighbors.after.length === 0 && (
+                        <p className="wiki-muted wiki-variants-empty">{t.page.variantsNone}</p>
+                      )}
+                </div>
+              )}
+            </section>
+
             <div className="wiki-lower-grid">
               {authUser?.employee && (
               <section className="wiki-panel">
@@ -1682,8 +1965,7 @@ export default function ProductPage() {
                   )}
                 </div>
                 <div className="wiki-list-cards issues">
-                  {issues.length > 0 ? (
-                    issues.map((item, index) => (
+                  {issues.map((item, index) => (
                       <article key={`${item.title}-${index}`} className="wiki-note-card">
                         <button
                           type="button"
@@ -1710,8 +1992,27 @@ export default function ProductPage() {
                           ) : null}
                         </button>
                       </article>
-                    ))
-                  ) : (
+                    ))}
+
+                  {inheritedIssues.map((item, index) => (
+                    <article key={item.key} className="wiki-note-card wiki-note-card-inherited">
+                      <button
+                        type="button"
+                        className="wiki-doc-card-link"
+                        onClick={() => setInheritedIssuePreviewIndex(index)}
+                      >
+                        <span className="wiki-inherited-badge">⚠ {t.page.linkedProblemBadge}</span>
+                        <strong>{item.issue.title}</strong>
+                        {item.issue.description ? <p>{item.issue.description}</p> : null}
+                        <span className="wiki-inherited-source">
+                          {t.page.problemFrom} {item.sourceTitle}
+                          {item.sourceArtNr ? ` (${item.sourceArtNr})` : ""}
+                        </span>
+                      </button>
+                    </article>
+                  ))}
+
+                  {issues.length === 0 && inheritedIssues.length === 0 && (
                     <p className="wiki-muted">{t.page.noIssues}</p>
                   )}
                 </div>
@@ -2257,92 +2558,133 @@ export default function ProductPage() {
         )}
 
         {/* Doc Preview Modal */}
-        {docPreviewIndex !== null && docsEntries[docPreviewIndex] && (
-          <div
-            className="wiki-modal-overlay"
-            onClick={() => setDocPreviewIndex(null)}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="doc-preview-title"
-          >
-            <div className="wiki-modal-dialog wiki-preview-dialog" onClick={(e) => e.stopPropagation()}>
-              <div className="wiki-modal-content">
-                <div className="wiki-modal-header">
-                  <h2 id="doc-preview-title">{docsEntries[docPreviewIndex]?.title}</h2>
+        {docPreviewIndex !== null && docsEntries[docPreviewIndex] && (() => {
+          const doc = docsEntries[docPreviewIndex]!;
+          const mediaList = (doc.attachments ?? [])
+            .map((a) => attachmentMediaById.get(Number(a)))
+            .filter((m): m is EntryMedia => Boolean(m));
+          const active = mediaList[docPreviewAttachment] ?? mediaList[0] ?? null;
+          const sourceLink = doc.link ? normalizeExternalLink(doc.link) : null;
+
+          return (
+            <div
+              className="wiki-modal-overlay"
+              onClick={() => setDocPreviewIndex(null)}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="doc-preview-title"
+            >
+              <div className="wiki-modal-dialog wiki-doc-viewer" onClick={(e) => e.stopPropagation()}>
+                <header className="wiki-doc-viewer-header">
+                  <h2 id="doc-preview-title">{doc.title}</h2>
                   <button
                     type="button"
                     className="wiki-modal-close"
                     onClick={() => setDocPreviewIndex(null)}
-                    aria-label="Close preview"
+                    aria-label={t.page.docClose}
                   >
                     ✕
                   </button>
-                </div>
+                </header>
 
-                <div className="wiki-modal-body">
-                  {docsEntries[docPreviewIndex]?.description && (
-                    <div className="wiki-doc-preview-desc">
-                      <p>{docsEntries[docPreviewIndex].description}</p>
+                <div className="wiki-doc-viewer-body">
+                  <div className="wiki-doc-viewer-main">
+                    <div className="wiki-doc-viewer-stage">
+                      {active ? (
+                        renderDocPreviewPane(active, t.page.docNoPreview)
+                      ) : (
+                        <div className="wiki-doc-viewer-fallback">
+                          <p className="wiki-muted">{t.page.docNoFile}</p>
+                        </div>
+                      )}
                     </div>
-                  )}
 
-                  {docsEntries[docPreviewIndex]?.attachments?.length ? (
-                    <div className="wiki-doc-preview-attachments">
-                      <h3>Attachments</h3>
-                      <div className="wiki-card-attachments">
-                        {docsEntries[docPreviewIndex].attachments.map((attachment, idx) => {
-                          const media = attachmentMediaById.get(Number(attachment));
-                          if (!media) {
-                            return null;
-                          }
-
-                          return (
-                            <a
-                              key={`${media.id}-${idx}`}
-                              href={media.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="wiki-card-attachment"
-                            >
-                              {isImageAttachment(media.url) ? (
-                                <img
-                                  src={media.url}
-                                  alt={media.name ?? `Attachment ${idx + 1}`}
-                                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
-                                />
-                              ) : null}
-                              <span>{media.name ?? `Attachment ${idx + 1}`}</span>
-                            </a>
-                          );
-                        })}
+                    {mediaList.length > 1 && (
+                      <div className="wiki-doc-viewer-tabs" role="tablist">
+                        {mediaList.map((m, i) => (
+                          <button
+                            key={`${m.id}-${i}`}
+                            type="button"
+                            role="tab"
+                            aria-selected={i === docPreviewAttachment}
+                            className={`wiki-doc-viewer-tab${i === docPreviewAttachment ? " active" : ""}`}
+                            onClick={() => setDocPreviewAttachment(i)}
+                            title={m.name ?? `${t.page.docFile} ${i + 1}`}
+                          >
+                            {m.name ?? `${t.page.docFile} ${i + 1}`}
+                          </button>
+                        ))}
                       </div>
-                    </div>
-                  ) : null}
-                </div>
+                    )}
+                  </div>
 
-                <div className="wiki-modal-footer">
-                  {docsEntries[docPreviewIndex]?.link && normalizeExternalLink(docsEntries[docPreviewIndex].link) && (
-                    <a
-                      href={normalizeExternalLink(docsEntries[docPreviewIndex].link)!}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="wiki-button primary"
-                    >
-                      Open Link →
-                    </a>
-                  )}
-                  <button
-                    type="button"
-                    className="wiki-button secondary"
-                    onClick={() => setDocPreviewIndex(null)}
-                  >
-                    Close
-                  </button>
+                  <aside className="wiki-doc-viewer-meta">
+                    <h3>{t.page.docDetails}</h3>
+                    <dl className="wiki-doc-meta-list">
+                      <dt>{t.page.docName}</dt>
+                      <dd>{doc.title || "—"}</dd>
+
+                      {doc.description ? (
+                        <>
+                          <dt>{t.page.docDescription}</dt>
+                          <dd>{doc.description}</dd>
+                        </>
+                      ) : null}
+
+                      {active ? (
+                        <>
+                          <dt>{t.page.docFile}</dt>
+                          <dd className="wiki-doc-meta-break">{active.name ?? "—"}</dd>
+                          <dt>{t.page.docType}</dt>
+                          <dd>{fileTypeLabel(active.url)}</dd>
+                        </>
+                      ) : null}
+
+                      {sourceLink ? (
+                        <>
+                          <dt>{t.page.docSource}</dt>
+                          <dd className="wiki-doc-meta-break">
+                            <a href={sourceLink} target="_blank" rel="noopener noreferrer">
+                              {doc.link}
+                            </a>
+                          </dd>
+                        </>
+                      ) : null}
+                    </dl>
+
+                    <div className="wiki-doc-viewer-actions">
+                      {active ? (
+                        <a className="wiki-button primary" href={active.url} download={active.name ?? ""}>
+                          {t.page.docDownload}
+                        </a>
+                      ) : null}
+                      {active ? (
+                        <a
+                          className="wiki-button secondary"
+                          href={active.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          {t.page.docOpenNewTab}
+                        </a>
+                      ) : null}
+                      {sourceLink ? (
+                        <a
+                          className="wiki-button secondary"
+                          href={sourceLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          {t.page.docOpenSource}
+                        </a>
+                      ) : null}
+                    </div>
+                  </aside>
                 </div>
               </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {issuePreviewIndex !== null && issues[issuePreviewIndex] && (
           <div
@@ -2412,6 +2754,107 @@ export default function ProductPage() {
                     type="button"
                     className="wiki-button secondary"
                     onClick={() => setIssuePreviewIndex(null)}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {inheritedIssuePreviewIndex !== null && inheritedIssues[inheritedIssuePreviewIndex] && (
+          <div
+            className="wiki-modal-overlay"
+            onClick={() => setInheritedIssuePreviewIndex(null)}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="inherited-issue-preview-title"
+          >
+            <div className="wiki-modal-dialog wiki-preview-dialog" onClick={(e) => e.stopPropagation()}>
+              <div className="wiki-modal-content">
+                <div className="wiki-modal-header">
+                  <h2 id="inherited-issue-preview-title">
+                    {inheritedIssues[inheritedIssuePreviewIndex]?.issue.title}
+                  </h2>
+                  <button
+                    type="button"
+                    className="wiki-modal-close"
+                    onClick={() => setInheritedIssuePreviewIndex(null)}
+                    aria-label="Close preview"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div className="wiki-modal-body">
+                  <div className="wiki-inherited-source-line">
+                    <span className="wiki-inherited-badge">⚠ {t.page.linkedProblemBadge}</span>
+                    <span>
+                      {t.page.problemSource}:{" "}
+                      <Link
+                        href={`/products/${inheritedIssues[inheritedIssuePreviewIndex]!.sourceId}`}
+                        className="wiki-card-link"
+                      >
+                        {inheritedIssues[inheritedIssuePreviewIndex]!.sourceTitle}
+                        {inheritedIssues[inheritedIssuePreviewIndex]!.sourceArtNr
+                          ? ` (${inheritedIssues[inheritedIssuePreviewIndex]!.sourceArtNr})`
+                          : ""}
+                      </Link>
+                    </span>
+                  </div>
+
+                  {inheritedIssues[inheritedIssuePreviewIndex]?.issue.description && (
+                    <div className="wiki-doc-preview-desc">
+                      <p>{inheritedIssues[inheritedIssuePreviewIndex].issue.description}</p>
+                    </div>
+                  )}
+
+                  {inheritedIssues[inheritedIssuePreviewIndex]?.issue.attachments?.length ? (
+                    <div className="wiki-doc-preview-attachments">
+                      <h3>Attachments</h3>
+                      <div className="wiki-card-attachments">
+                        {inheritedIssues[inheritedIssuePreviewIndex]!.issue.attachments!.map((attachment, idx) => {
+                          const media = attachmentMediaById.get(Number(attachment));
+                          if (!media) {
+                            return null;
+                          }
+
+                          return (
+                            <a
+                              key={`${media.id}-${idx}`}
+                              href={media.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="wiki-card-attachment"
+                            >
+                              {isImageAttachment(media.url) ? (
+                                <img
+                                  src={media.url}
+                                  alt={media.name ?? `Attachment ${idx + 1}`}
+                                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+                                />
+                              ) : null}
+                              <span>{media.name ?? `Attachment ${idx + 1}`}</span>
+                            </a>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="wiki-modal-footer">
+                  <Link
+                    href={`/products/${inheritedIssues[inheritedIssuePreviewIndex]!.sourceId}`}
+                    className="wiki-button"
+                  >
+                    {t.page.openSourceProduct}
+                  </Link>
+                  <button
+                    type="button"
+                    className="wiki-button secondary"
+                    onClick={() => setInheritedIssuePreviewIndex(null)}
                   >
                     Close
                   </button>

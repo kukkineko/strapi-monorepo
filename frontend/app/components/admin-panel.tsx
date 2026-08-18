@@ -1515,10 +1515,10 @@ function CrossLinkGraph({
   );
 }
 
-/* ─── DBStatsContent ─────────────────────────────────────────────────────── */
-/* Fetches and displays live DB statistics.                                   */
+/* ─── DBStatsOverview ────────────────────────────────────────────────────── */
+/* Fetches and displays live DB statistics (the default "Overview" tab).      */
 
-export function DBStatsContent() {
+function DBStatsOverview() {
   const [data,    setData]    = useState<DBData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState("");
@@ -1932,6 +1932,330 @@ export function DBStatsContent() {
           Refresh
         </button>
       </p>
+    </div>
+  );
+}
+
+/* ─── PageViewsContent ───────────────────────────────────────────────────── */
+/* Ranked list of how many times each item page has been opened. Data comes   */
+/* from the file-backed view counter (see app/lib/page-views.ts).             */
+
+type ViewCounts = { day: number; week: number; month: number; year: number; all: number };
+
+type ViewItem = {
+  documentId: string;
+  title:      string;
+  artNr:      string | null;
+  last:       string | null;
+  counts:     ViewCounts;
+};
+
+type ViewStatsData = {
+  items:       ViewItem[];
+  generatedAt: string;
+};
+
+type ViewRange = keyof ViewCounts;
+
+const VIEW_RANGES: Array<{ key: ViewRange; label: string; window: string }> = [
+  { key: "day",   label: "Day",      window: "last 24 hours" },
+  { key: "week",  label: "Week",     window: "last 7 days"   },
+  { key: "month", label: "Month",    window: "last 30 days"  },
+  { key: "year",  label: "Year",     window: "last 365 days" },
+  { key: "all",   label: "All time", window: "all time"      },
+];
+
+function PageViewsContent({ onClose }: { onClose: () => void }) {
+  const router = useRouter();
+  const [data,    setData]    = useState<ViewStatsData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState("");
+  const [query,   setQuery]   = useState("");
+  const [range,   setRange]   = useState<ViewRange>("all");
+  /* documentId of the item currently hovered in either the list or the chart —
+     drives the two-way highlight between them. */
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+
+  async function load() {
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch("/api/entries/views/stats");
+      if (!res.ok) {
+        const body = (await res.json()) as { error?: string };
+        throw new Error(body.error ?? "Failed to load page views.");
+      }
+      setData((await res.json()) as ViewStatsData);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load page views.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { void load(); }, []); // eslint-disable-line react-hooks/set-state-in-effect
+
+  /* Rank + filter for the selected window. An item only appears if it has at
+     least one view inside the window, so "Day" shows just what's been opened
+     in the last 24h, sorted by that window's count. */
+  const rankedItems = useMemo(() => {
+    const items = data?.items ?? [];
+    const q = query.trim().toLowerCase();
+    return items
+      .filter((i) => i.counts[range] > 0)
+      .filter((i) =>
+        !q ||
+        i.title.toLowerCase().includes(q) ||
+        (i.artNr ?? "").toLowerCase().includes(q) ||
+        i.documentId.toLowerCase().includes(q),
+      )
+      .sort((a, b) => b.counts[range] - a.counts[range] || a.title.localeCompare(b.title));
+  }, [data?.items, query, range]);
+
+  const totalInRange = useMemo(
+    () => (data?.items ?? []).reduce((sum, i) => sum + i.counts[range], 0),
+    [data?.items, range],
+  );
+  const itemsInRange = useMemo(
+    () => (data?.items ?? []).filter((i) => i.counts[range] > 0).length,
+    [data?.items, range],
+  );
+  if (loading) {
+    return (
+      <div className="wiki-admin-loading">
+        <span className="wiki-admin-spinner" aria-hidden="true" />
+        Loading page views…
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div>
+        <p className="wiki-error wiki-admin-error">{error}</p>
+        <button type="button" className="wiki-admin-db-btn" onClick={() => void load()}>
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  if (!data) return null;
+
+  const fmt = (n: number) => n.toLocaleString();
+  const activeRange = VIEW_RANGES.find((r) => r.key === range) ?? VIEW_RANGES[VIEW_RANGES.length - 1]!;
+  /* Cap the linked list + chart to a hover-navigable size. Items are already
+     sorted desc, so shown[0] is the tallest bar. */
+  const shown = rankedItems.slice(0, 50);
+  const maxCount = Math.max(shown[0]?.counts[range] ?? 1, 1);
+
+  return (
+    <div className="wiki-admin-db-section">
+      {/* ── Time-range selector ── */}
+      <div className="wiki-user-panel-tabs" role="tablist" aria-label="View time range">
+        {VIEW_RANGES.map((r) => (
+          <button
+            key={r.key}
+            type="button" role="tab"
+            aria-selected={range === r.key}
+            className={`wiki-user-panel-tab-btn${range === r.key ? " active" : ""}`}
+            onClick={() => setRange(r.key)}
+          >
+            {r.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Summary stats (for the selected window) ── */}
+      <div className="wiki-admin-stats">
+        <div className="wiki-admin-stat">
+          <span className="wiki-admin-stat-num">{fmt(totalInRange)}</span>
+          <span className="wiki-admin-stat-lbl">Views</span>
+          <span className="wiki-admin-stat-sub">{activeRange.window}</span>
+        </div>
+        <div className="wiki-admin-stat">
+          <span className="wiki-admin-stat-num">{fmt(itemsInRange)}</span>
+          <span className="wiki-admin-stat-lbl">Items Viewed</span>
+          <span className="wiki-admin-stat-sub">{activeRange.window}</span>
+        </div>
+      </div>
+
+      {/* ── Most viewed items ── */}
+      <div className="wiki-admin-db-card">
+        <div className="wiki-admin-db-card-header">
+          <span className="wiki-admin-db-card-icon" aria-hidden="true">👁️</span>
+          <div>
+            <h3>Most Viewed Items</h3>
+            <p>Item-page opens ({activeRange.window}). Counted once per user per 24&nbsp;h.</p>
+          </div>
+        </div>
+
+        {data.items.length === 0 ? (
+          <p className="wiki-admin-db-chart-empty">
+            No page views recorded yet. Views are counted as logged-in users open item pages.
+          </p>
+        ) : (
+          <>
+            {/* Search */}
+            <div className="wiki-admin-search-row" style={{ padding: "0 1rem" }}>
+              <div className="wiki-admin-search-wrap">
+                <svg className="wiki-admin-search-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" strokeWidth="2" />
+                  <path d="M16.65 16.65L21 21" fill="none" stroke="currentColor" strokeWidth="2" />
+                </svg>
+                <input
+                  type="search"
+                  className="wiki-admin-search"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search by name, ArtNr or ID…"
+                  aria-label="Search viewed items"
+                />
+              </div>
+              {query.trim() && (
+                <span className="wiki-admin-search-count">
+                  {rankedItems.length}
+                </span>
+              )}
+            </div>
+
+            {rankedItems.length === 0 ? (
+              <p className="wiki-admin-db-chart-empty">
+                {query.trim()
+                  ? "No items match your search."
+                  : `No item views in the ${activeRange.window}.`}
+              </p>
+            ) : (
+              <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", padding: "0 1rem 0.25rem", alignItems: "stretch" }}>
+                {/* Ranked list (left, text left-aligned) */}
+                <div style={{ flex: "1 1 260px", minWidth: 0, maxHeight: "260px", overflowY: "auto" }}>
+                  {shown.map((item) => {
+                    const active = hoveredId === item.documentId;
+                    const lastStr = item.last
+                      ? new Date(item.last).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+                      : "—";
+                    return (
+                      <button
+                        key={item.documentId}
+                        id={`pvrow-${item.documentId}`}
+                        type="button"
+                        onMouseEnter={() => setHoveredId(item.documentId)}
+                        onMouseLeave={() => setHoveredId(null)}
+                        onClick={() => { onClose(); router.push(`/products/${item.documentId}`); }}
+                        title={`Open ${item.title} · last viewed ${lastStr}`}
+                        style={{
+                          display: "flex",
+                          alignItems: "baseline",
+                          gap: "0.6rem",
+                          width: "100%",
+                          padding: "0.3rem 0.5rem",
+                          borderRadius: "6px",
+                          border: "none",
+                          textAlign: "left",
+                          cursor: "pointer",
+                          background: active ? "#dbeafe" : "transparent",
+                          color: active ? "#1e40af" : "inherit",
+                          fontWeight: active ? 600 : 400,
+                          transition: "background 0.1s",
+                        }}
+                      >
+                        <span style={{ minWidth: "3.2rem", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
+                          {fmt(item.counts[range])}
+                        </span>
+                        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {item.title}
+                          {item.artNr && <span className="wiki-admin-db-metric-sub"> · {item.artNr}</span>}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Vertical bar chart (right) — bars rise bottom→up; hover links to the list */}
+                <div style={{ flex: "1 1 260px", minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "flex-end", gap: "3px", height: "260px", overflowX: "auto", paddingBottom: "2px" }}>
+                    {shown.map((item) => {
+                      const active = hoveredId === item.documentId;
+                      const heightPct = Math.max(2, (item.counts[range] / maxCount) * 100);
+                      return (
+                        <div
+                          key={item.documentId}
+                          role="button"
+                          aria-label={`${item.title}, ${fmt(item.counts[range])} views`}
+                          onMouseEnter={() => {
+                            setHoveredId(item.documentId);
+                            document.getElementById(`pvrow-${item.documentId}`)?.scrollIntoView({ block: "nearest" });
+                          }}
+                          onMouseLeave={() => setHoveredId(null)}
+                          onClick={() => { onClose(); router.push(`/products/${item.documentId}`); }}
+                          title={`${item.title} — ${fmt(item.counts[range])} view${item.counts[range] === 1 ? "" : "s"}`}
+                          style={{
+                            flex: "1 0 8px",
+                            minWidth: "8px",
+                            height: `${heightPct}%`,
+                            background: active ? "#2563eb" : "#bfdbfe",
+                            borderRadius: "3px 3px 0 0",
+                            cursor: "pointer",
+                            transition: "background 0.1s, height 0.15s",
+                          }}
+                        />
+                      );
+                    })}
+                  </div>
+                  <p className="wiki-muted" style={{ textAlign: "center", fontSize: "0.7rem", margin: "0.35rem 0 0" }}>
+                    Views per item · hover a bar to find it in the list
+                  </p>
+                </div>
+              </div>
+            )}
+            {rankedItems.length > shown.length && (
+              <p className="wiki-muted" style={{ textAlign: "center", padding: "0.5rem 0" }}>
+                Showing top {shown.length} of {rankedItems.length} items
+              </p>
+            )}
+          </>
+        )}
+      </div>
+
+      <p className="wiki-admin-db-generated">
+        Generated {new Date(data.generatedAt).toLocaleString()}
+        {" · "}
+        <button type="button" className="wiki-admin-db-refresh-link" onClick={() => void load()}>
+          Refresh
+        </button>
+      </p>
+    </div>
+  );
+}
+
+/* ─── DBStatsContent ─────────────────────────────────────────────────────── */
+/* Tabbed wrapper: the original stats overview plus a Page Views tab.         */
+
+export function DBStatsContent({ onClose }: { onClose: () => void }) {
+  const [tab, setTab] = useState<"overview" | "views">("overview");
+
+  return (
+    <div className="wiki-admin-db-section" style={{ gap: "1rem" }}>
+      <div className="wiki-user-panel-tabs" role="tablist">
+        <button
+          type="button" role="tab"
+          aria-selected={tab === "overview"}
+          className={`wiki-user-panel-tab-btn${tab === "overview" ? " active" : ""}`}
+          onClick={() => setTab("overview")}
+        >
+          Overview
+        </button>
+        <button
+          type="button" role="tab"
+          aria-selected={tab === "views"}
+          className={`wiki-user-panel-tab-btn${tab === "views" ? " active" : ""}`}
+          onClick={() => setTab("views")}
+        >
+          Page Views
+        </button>
+      </div>
+
+      {tab === "overview" ? <DBStatsOverview /> : <PageViewsContent onClose={onClose} />}
     </div>
   );
 }

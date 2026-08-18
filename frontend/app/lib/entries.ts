@@ -53,6 +53,9 @@ export type EntryPayload = {
   rubrik?: string | string[] | Record<string, unknown>;
 };
 
+/** The two artNr-ordered neighbourhoods around an entry (see getArtNrNeighbors). */
+export type EntryNeighbors = { before: Entry[]; after: Entry[] };
+
 export type LinkVote = { v: 1 | -1; r?: string };
 
 export type LinkEntry = {
@@ -135,6 +138,12 @@ const LIST_FIELDS_QUERY =
   "&fields[3]=artNr&fields[4]=EAN&fields[5]=rubrik" +
   "&fields[6]=tags&fields[7]=desc&fields[8]=IGS" +
   "&fields[9]=updatedAt&populate[0]=pictures";
+// Light projection for the artNr-neighbours window on the product page: just
+// enough to render a row (id/documentId/title/artNr/EAN) plus the first picture
+// for a thumbnail.
+const NEIGHBOR_FIELDS_QUERY =
+  "?fields[0]=id&fields[1]=documentId&fields[2]=title" +
+  "&fields[3]=artNr&fields[4]=EAN&fields[5]=desc&populate[0]=pictures";
 const LIST_PAGE_SIZE = 100;
 // The listing page loads only this many of the most-recently-updated entries
 // up front; everything else is reachable via the server search endpoint.
@@ -868,6 +877,32 @@ export async function listEntriesBySection(section: string): Promise<Entry[]> {
   }
 }
 
+/**
+ * Relevance score for a search hit (higher = better). artNr / EAN matches are
+ * ranked ABOVE title/tag matches so that searching an article-number fragment
+ * (e.g. "PFL" → "441612PFL") surfaces the numbered item even when the same
+ * substring also appears in many product titles (German "Pflege…" = care).
+ */
+function scoreSearchRelevance(entry: Entry, q: string, tokens: string[]): number {
+  const title = entry.title.toLowerCase();
+  const artNr = (entry.artNr ?? "").toLowerCase();
+  const ean = (entry.EAN ?? "").toLowerCase();
+  const tags = (entry.tags ?? "").toLowerCase();
+
+  if (artNr === q || ean === q) return 100;
+  if (title === q) return 95;
+  if (artNr.startsWith(q) || ean.startsWith(q)) return 90;
+  if (title.startsWith(q)) return 80;
+  if (artNr.includes(q) || ean.includes(q)) return 70;
+  // Multi-token: every token lives somewhere in artNr/EAN ("441612 pfl").
+  if (tokens.length > 1 && tokens.every((t) => artNr.includes(t) || ean.includes(t))) return 65;
+  if (title.includes(q)) return 60;
+  if (tags.includes(q)) return 50;
+  const hay = `${title} ${artNr} ${ean} ${tags}`;
+  if (tokens.every((t) => hay.includes(t))) return 30;
+  return 10;
+}
+
 export async function searchEntries(query: string, limit = 24): Promise<Entry[]> {
   const trimmed = query.trim();
   if (!trimmed) {
@@ -900,12 +935,15 @@ export async function searchEntries(query: string, limit = 24): Promise<Entry[]>
   }
 
   // Token-based AND-of-ORs: every whitespace-separated token must match at
-  // least one field (title / artNr / EAN / documentId / tags). This lets
-  // multi-word queries match across fields (e.g. "pump 230v" → title contains
-  // "pump" AND artNr contains "230v"), searches tokenized tags, and pushes all
-  // the matching work into Strapi so the entire catalogue is searched without
-  // loading it into memory. A single-token query collapses to the old behaviour.
-  const SEARCH_FIELDS = ["title", "artNr", "EAN", "documentId", "tags"] as const;
+  // least one field (title / artNr / EAN / documentId / tags / desc / IGS). This
+  // lets multi-word queries match across fields (e.g. "pump 230v" → title
+  // contains "pump" AND artNr contains "230v"), searches tokenized tags, and
+  // pushes all the matching work into Strapi so the entire catalogue is searched
+  // without loading it into memory. A single-token query collapses to the old
+  // behaviour. IGS is a JSON blob holding internal designations (e.g. the
+  // "Bezeichnung 2" value "5MPRC-3/5TPEC-3 (…)"), so a $containsi over its raw
+  // text lets those internal codes surface the item too.
+  const SEARCH_FIELDS = ["title", "artNr", "EAN", "documentId", "tags", "desc", "IGS"] as const;
   const tokens = trimmed.split(/\s+/).filter(Boolean).slice(0, 8);
   const filterQuery = tokens
     .flatMap((token, ti) => {
@@ -917,10 +955,16 @@ export async function searchEntries(query: string, limit = 24): Promise<Entry[]>
     })
     .join("&");
 
+  // Over-fetch candidates so we can rank artNr/EAN matches to the top before
+  // slicing to the caller's limit — otherwise a common substring shared by many
+  // product titles buries the numbered-item (artNr/EAN) matches, and a small
+  // preview limit (e.g. 6) would never show them.
+  const candidateSize = Math.min(100, Math.max(safeLimit, 50));
+
   const request = (async () => {
     const res = await fetch(
       `${STRAPI_URL}/api/entries${POPULATE_QUERY}` +
-        `&pagination[pageSize]=${safeLimit}` +
+        `&pagination[pageSize]=${candidateSize}` +
         `&${filterQuery}`,
       {
         headers: getHeaders(),
@@ -939,17 +983,26 @@ export async function searchEntries(query: string, limit = 24): Promise<Entry[]>
       return true;
     });
 
+    // Rank so artNr/EAN hits come first, then keep only the requested count.
+    const qLower = trimmed.toLowerCase();
+    const tokLower = tokens.map((t) => t.toLowerCase());
+    const ranked = deduplicated
+      .map((entry) => ({ entry, score: scoreSearchRelevance(entry, qLower, tokLower) }))
+      .sort((a, b) => b.score - a.score)
+      .map((s) => s.entry)
+      .slice(0, safeLimit);
+
     searchEntriesCache.set(cacheKey, {
-      value: deduplicated,
+      value: ranked,
       expiresAt: Date.now() + CACHE_TTL_MS,
     });
     pruneSearchCache();
 
-    for (const entry of deduplicated) {
+    for (const entry of ranked) {
       cacheEntry(entry);
     }
 
-    return deduplicated;
+    return ranked;
   })();
 
   searchEntriesInFlight.set(cacheKey, request);
@@ -1068,6 +1121,75 @@ export async function getEntryById(id: string): Promise<Entry | null> {
   } finally {
     getEntryInFlightByDocumentId.delete(documentId);
   }
+}
+
+/**
+ * Loads the entries whose artNr sits immediately before and after the given
+ * artNr in lexicographic (dictionary) order. Because a base article's variants
+ * are formed by appending digits — "04305" → "043051", "043052" — the base
+ * sorts right before its variants, so this window naturally shows an item
+ * together with its replacement parts / versions.
+ *
+ * `count` items are returned on each side. The `before` list is ordered so it
+ * reads top-to-bottom toward the current entry (i.e. closest-last).
+ */
+export async function getArtNrNeighbors(artNr: string, count: number): Promise<EntryNeighbors> {
+  const trimmed = artNr.trim();
+  if (!trimmed) {
+    return { before: [], after: [] };
+  }
+
+  const safeCount = Math.max(1, Math.min(count, 50));
+
+  // ── Client-side: route through the Next.js API so the Strapi token stays on
+  // the server (mirrors searchEntries / getEntryById).
+  if (typeof window !== "undefined") {
+    const params = new URLSearchParams({ artNr: trimmed, count: String(safeCount) });
+    const res = await fetch(`/api/entries/neighbors?${params.toString()}`);
+    if (!res.ok) return { before: [], after: [] };
+    return (await res.json()) as EntryNeighbors;
+  }
+
+  // ── Server-side: one Strapi request per direction. `$gt`/`$lt` on the artNr
+  // string column give the dictionary-order neighbours.
+  const fetchDirection = async (direction: "before" | "after"): Promise<Entry[]> => {
+    const op = direction === "after" ? "$gt" : "$lt";
+    const order = direction === "after" ? "asc" : "desc";
+    const res = await fetch(
+      `${STRAPI_URL}/api/entries${NEIGHBOR_FIELDS_QUERY}` +
+        `&filters[artNr][${op}]=${encodeURIComponent(trimmed)}` +
+        `&sort=artNr:${order}` +
+        `&pagination[pageSize]=${safeCount}&pagination[page]=1`,
+      { headers: getHeaders(), cache: "no-store" },
+    );
+
+    const json = (await res.json()) as {
+      data?: unknown[];
+      error?: { message?: string };
+    };
+    if (!res.ok) {
+      throw new Error(json.error?.message ?? "Failed to fetch neighbours");
+    }
+
+    const normalized = (json.data ?? []).map(normalizeEntry);
+    const seen = new Set<string>();
+    return normalized.filter((entry) => {
+      if (seen.has(entry.documentId)) return false;
+      seen.add(entry.documentId);
+      return true;
+    });
+  };
+
+  const [before, after] = await Promise.all([
+    fetchDirection("before"),
+    fetchDirection("after"),
+  ]);
+
+  // `before` came back descending (closest artNr first); reverse it so the list
+  // ascends toward the current entry.
+  before.reverse();
+
+  return { before, after };
 }
 
 export async function createEntry(payload: EntryPayload): Promise<Entry> {

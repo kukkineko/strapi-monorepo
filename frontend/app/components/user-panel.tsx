@@ -493,7 +493,7 @@ function AdminTab({ onClose }: { onClose: () => void }) {
       {view === "users"      && <AdminPanelContent />}
       {view === "audit"      && <AuditLogContent />}
       {view === "db"         && <DBBackupContent />}
-      {view === "stats"      && <DBStatsContent />}
+      {view === "stats"      && <DBStatsContent onClose={onClose} />}
       {view === "import"     && <ImportDataContent />}
       {view === "confidence" && <LinkConfidenceContent />}
       {view === "assigndocs" && <AssignDocsContent />}

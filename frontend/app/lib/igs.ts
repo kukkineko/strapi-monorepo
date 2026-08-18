@@ -168,6 +168,61 @@ export function getIgsFieldValue(raw: string | undefined, candidates: string[]):
   return null;
 }
 
+/**
+ * Sets a single IGS field's value inside the raw IGS JSON, preserving the rest
+ * of the structure (INFO block, ordering, other fields). Matching is by
+ * normalized name, so "Rubrik" updates whichever entry the parser reads as the
+ * Rubrik field. Returns the re-serialized JSON, or null when there is no IGS
+ * data to update (empty/invalid) — callers should then leave IGS untouched.
+ */
+export function setIgsFieldValue(
+  raw: string | undefined,
+  fieldName: string,
+  value: string,
+): string | null {
+  const trimmed = raw?.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
+
+  const target = normalizeName(fieldName);
+
+  if (Array.isArray(parsed)) {
+    let found = false;
+    for (const item of parsed) {
+      if (
+        item &&
+        typeof item === "object" &&
+        typeof (item as { name?: unknown }).name === "string" &&
+        normalizeName((item as { name: string }).name) === target
+      ) {
+        (item as { value: unknown }).value = value;
+        found = true;
+      }
+    }
+    if (!found) {
+      parsed.push({ name: fieldName, value });
+    }
+    return JSON.stringify(parsed, null, 2);
+  }
+
+  if (parsed && typeof parsed === "object") {
+    const obj = parsed as Record<string, unknown>;
+    const matchedKey = Object.keys(obj).find((key) => normalizeName(key) === target);
+    obj[matchedKey ?? fieldName] = value;
+    return JSON.stringify(obj, null, 2);
+  }
+
+  return null;
+}
+
 export function getIgsDisplayFields(raw?: string): Array<{ label: string; value: string }> | null {
   const entries = parseIgsEntries(raw);
   if (!entries) {

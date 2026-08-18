@@ -1021,10 +1021,18 @@ a:hover {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   grid-template-areas:
     "name images"
-    "meta images"
     "summary images";
+  /* Name card sits at its natural (short) height; the summary box stretches to
+     fill the remaining height beside the images panel. */
+  grid-template-rows: min-content 1fr;
   gap: 1rem;
   align-items: stretch;
+}
+
+.wiki-name-meta-row {
+  display: flex;
+  gap: 1.25rem;
+  flex-wrap: wrap;
 }
 
 .wiki-detail-name {
@@ -1052,13 +1060,21 @@ a:hover {
 
 .wiki-detail-summary {
   grid-area: summary;
-  min-height: 220px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.wiki-detail-summary p {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .wiki-detail-images {
   grid-area: images;
   grid-column: 2;
-  grid-row: 1 / span 3;
+  grid-row: 1 / span 2;
 }
 
 .wiki-right-stack {
@@ -1358,7 +1374,7 @@ a:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 360px;
+  min-height: 240px;
 }
 
 .wiki-right-stack .wiki-panel {
@@ -1574,6 +1590,218 @@ a:hover {
   grid-auto-rows: minmax(4.8rem, auto);
 }
 
+/* ── artNr neighbours window (variants & replacement parts) ─────────────────── */
+.wiki-variants-panel {
+  margin-top: 1rem;
+}
+
+.wiki-variants-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+
+.wiki-variants-panel h2 {
+  margin: 0;
+}
+
+.wiki-variants-heading {
+  min-width: 0;
+}
+
+.wiki-variants-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.wiki-variants-stepper-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #2a3d6e;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.wiki-variants-stepper-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  border: 1px solid var(--line-soft);
+  background: #ffffff;
+  color: #2a3d6e;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+}
+
+.wiki-variants-stepper-btn:hover:not(:disabled) {
+  background: #efece2;
+  border-color: #2a3d6e;
+}
+
+.wiki-variants-stepper-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.wiki-variants-stepper-icon {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.wiki-variants-stepper-value {
+  min-width: 1.7rem;
+  text-align: center;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #2a3d6e;
+  font-variant-numeric: tabular-nums;
+}
+
+.wiki-variants-track {
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  padding: 0.15rem 0.1rem 0.5rem;
+  min-width: 0;
+  scrollbar-width: thin;
+  transition: opacity 0.15s ease;
+}
+
+.wiki-variants-track.is-loading {
+  opacity: 0.5;
+}
+
+.wiki-variant-card {
+  flex: 0 0 auto;
+  width: 138px;
+  scroll-snap-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.5rem;
+  border-radius: 10px;
+  border: 1px solid var(--line-soft);
+  background: #f5f3ec;
+  text-decoration: none;
+  color: inherit;
+  position: relative;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.05s ease;
+}
+
+a.wiki-variant-card:hover {
+  background: #efece2;
+  border-color: #2a3d6e;
+}
+
+a.wiki-variant-card:active {
+  transform: scale(0.98);
+}
+
+.wiki-variant-card--current {
+  background: linear-gradient(140deg, #e8edfb, #f2f5ff);
+  border-color: #2a3d6e;
+  box-shadow: inset 0 0 0 1px #2a3d6e;
+}
+
+.wiki-variant-card-thumb {
+  width: 100%;
+  height: 84px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #ffffff;
+  border: 1px solid var(--line-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wiki-variant-card-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.wiki-variant-thumb-empty {
+  width: 100%;
+  height: 100%;
+  background: repeating-linear-gradient(45deg, #f0f0f0, #f0f0f0 4px, #e8e8e8 4px, #e8e8e8 8px);
+}
+
+.wiki-variant-card-artnr {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #2a3d6e;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wiki-variant-card-title {
+  font-size: 0.74rem;
+  font-weight: 600;
+  line-height: 1.2;
+  color: #1f2937;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.wiki-variant-card-info {
+  font-size: 0.66rem;
+  line-height: 1.25;
+  color: #6b7280;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.wiki-variant-card-badge {
+  position: absolute;
+  top: 0.3rem;
+  right: 0.3rem;
+  font-size: 0.56rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #2a3d6e;
+  background: #ffffff;
+  border: 1px solid #b9c4e6;
+  border-radius: 999px;
+  padding: 0.08rem 0.35rem;
+}
+
+.wiki-variants-empty {
+  margin: 0.3rem 0;
+  align-self: center;
+}
+
+@media (max-width: 560px) {
+  .wiki-variants-header {
+    gap: 0.5rem;
+  }
+  .wiki-variant-card {
+    width: 120px;
+  }
+}
+
 .wiki-note-card {
   border-radius: 10px;
   border-left: 4px solid #ccc8be;
@@ -1606,6 +1834,61 @@ a:hover {
 .wiki-list-cards.issues .wiki-note-card:hover,
 .wiki-list-cards.issues .wiki-note-card:focus-within {
   background: #ffe4e9;
+}
+
+/* Inherited problems: surfaced from a directly-linked product (1 hop).
+   Distinguished from an item's own problems (red) by an amber, dashed edge. */
+.wiki-list-cards.issues .wiki-note-card.wiki-note-card-inherited {
+  background: #fffbeb;
+  border-left-style: dashed;
+  border-left-color: #d97706;
+}
+
+.wiki-list-cards.issues .wiki-note-card.wiki-note-card-inherited:hover,
+.wiki-list-cards.issues .wiki-note-card.wiki-note-card-inherited:focus-within {
+  background: #fef3c7;
+}
+
+.wiki-inherited-badge {
+  display: inline-block;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #b45309;
+  background: #fde68a;
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+/* Inside the problem card, the label sits in its own boxed header band. */
+.wiki-note-card-inherited .wiki-inherited-badge {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  text-align: center;
+  border: 1px solid #f59e0b;
+  border-radius: 8px;
+  padding: 0.32rem 0.5rem;
+  margin-bottom: 0.55rem;
+}
+
+.wiki-inherited-source {
+  display: block;
+  margin-top: 0.4rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #92400e;
+}
+
+.wiki-inherited-source-line {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.6rem;
+  font-weight: 600;
 }
 
 .wiki-section-header {
@@ -2197,6 +2480,215 @@ a:hover {
   flex-wrap: wrap;
 }
 
+/* ── Document viewer modal (inline preview + metadata sidebar) ─────────────── */
+.wiki-doc-viewer {
+  width: min(1100px, 96vw);
+  height: min(88vh, 900px);
+  max-height: 88vh;
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.wiki-doc-viewer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1.1rem;
+  border-bottom: 1px solid var(--line-soft);
+  flex: 0 0 auto;
+}
+
+.wiki-doc-viewer-header h2 {
+  margin: 0;
+  font-size: 1.02rem;
+  font-weight: 700;
+  color: #2a3d6e;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wiki-doc-viewer-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 288px;
+}
+
+.wiki-doc-viewer-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-right: 1px solid var(--line-soft);
+}
+
+.wiki-doc-viewer-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #3a3f47;
+  overflow: auto;
+  padding: 0.5rem;
+}
+
+.wiki-doc-viewer-frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #ffffff;
+  border-radius: 4px;
+}
+
+.wiki-doc-viewer-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+.wiki-doc-viewer-fallback {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.55rem;
+  text-align: center;
+  color: #e5e7eb;
+  padding: 2rem;
+}
+
+.wiki-doc-viewer-fallback-name {
+  margin: 0;
+  font-weight: 700;
+  color: #f3f4f6;
+  word-break: break-word;
+}
+
+.wiki-doc-viewer-fallback .wiki-muted {
+  color: #b8bec9;
+}
+
+.wiki-doc-viewer-tabs {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 0.4rem;
+  padding: 0.5rem;
+  overflow-x: auto;
+  border-top: 1px solid var(--line-soft);
+  background: #faf9f5;
+}
+
+.wiki-doc-viewer-tab {
+  flex: 0 0 auto;
+  max-width: 180px;
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid var(--line-soft);
+  background: #ffffff;
+  color: #2a3d6e;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.wiki-doc-viewer-tab:hover {
+  background: #efece2;
+  border-color: #2a3d6e;
+}
+
+.wiki-doc-viewer-tab.active {
+  background: #e8edfb;
+  border-color: #2a3d6e;
+}
+
+.wiki-doc-viewer-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem;
+  overflow-y: auto;
+  background: #faf9f5;
+}
+
+.wiki-doc-viewer-meta h3 {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #2a3d6e;
+}
+
+.wiki-doc-meta-list {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.wiki-doc-meta-list dt {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+  color: #6b7280;
+  margin-top: 0.55rem;
+}
+
+.wiki-doc-meta-list dd {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #1f2937;
+}
+
+.wiki-doc-meta-break {
+  word-break: break-word;
+}
+
+.wiki-doc-meta-list a {
+  color: #2a3d6e;
+  text-decoration: underline;
+}
+
+.wiki-doc-viewer-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: auto;
+  padding-top: 0.5rem;
+}
+
+.wiki-doc-viewer-actions .wiki-button {
+  width: 100%;
+  text-align: center;
+  justify-content: center;
+}
+
+@media (max-width: 720px) {
+  .wiki-doc-viewer {
+    width: 96vw;
+    height: 90vh;
+  }
+  .wiki-doc-viewer-body {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+  .wiki-doc-viewer-main {
+    border-right: 0;
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .wiki-doc-viewer-meta {
+    max-height: 42vh;
+  }
+}
+
 .wiki-doc-preview-desc {
   padding: 0.75rem;
   background: #f5f3ec;
@@ -2382,36 +2874,6 @@ a:hover {
   fill: #8393ff;
 }
 
-/* â”€â”€ Category filter select (left of search input) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
-.wiki-topbar-search-section {
-  height: 100%;
-  border: 1px solid var(--line);
-  border-radius: var(--topbar-radius);
-  padding: 0 0.52rem;
-  background: #f0ede5;
-  font: inherit;
-  font-size: 0.78rem;
-  font-weight: bold;
-  color: #2a3d6e;
-  cursor: pointer;
-  flex: 0 0 auto;
-  box-sizing: border-box;
-  appearance: none;
-  -webkit-appearance: none;
-  min-width: 56px;
-  max-width: 76px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  transition: border-color 0.16s ease, background 0.16s ease;
-}
-
-.wiki-topbar-search-section:hover,
-.wiki-topbar-search-section:focus {
-  border-color: #8393ff;
-  background: var(--cornflower-light);
-  outline: none;
-}
 
 /* â”€â”€ Login chip variants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .wiki-login-chip-active {
@@ -5415,9 +5877,9 @@ a:hover {
 
   .wiki-detail-grid {
     grid-template-columns: 1fr;
+    grid-template-rows: none;
     grid-template-areas:
       "name"
-      "meta"
       "images"
       "summary";
   }
@@ -5666,9 +6128,9 @@ a:hover {
 
   .wiki-detail-grid {
     grid-template-columns: 1fr;
+    grid-template-rows: none;
     grid-template-areas:
       "name"
-      "meta"
       "images"
       "summary";
   }
@@ -7811,3 +8273,7 @@ body {
 .wiki-user-list-empty-row {
   margin: 0.2rem 0 0.1rem;
 }
+
+
+
+
