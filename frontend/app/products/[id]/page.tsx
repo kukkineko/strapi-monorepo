@@ -14,7 +14,7 @@ import {
 } from "@/app/lib/topbar-icons";
 import type { Entry, EntryNeighbors, EntryPayload, LinkEntry } from "@/app/lib/entries";
 import { getArtNrNeighbors, getEntryById, getMediaById, listEntries, normalizeRubrikValues, parseRubrikNumber, parseLinkEntries, searchEntries, serializeLinkEntries, uploadMedia } from "@/app/lib/entries";
-import { parseIgsEntries, getIgsFieldValue } from "@/app/lib/igs";
+import { parseIgsEntries, getIgsFieldValue, setIgsFieldValue } from "@/app/lib/igs";
 import type { AuthUser } from "@/app/lib/auth-types";
 
 type TextEntry = {
@@ -726,7 +726,18 @@ export default function ProductPage() {
     }
     setRubrikSaving(true);
     try {
-      const fullPayload = buildEntryPayload(entry, { rubrik: nextRubriks });
+      // Mirror the rubrik into the IGS blob so the IGS view reflects the change.
+      // Use the friendly labels (R01…, Ers., Ext.), or "N.K." when uncategorized.
+      // setIgsFieldValue returns null when there is no IGS data, leaving it untouched.
+      const rubrikText =
+        nextRubriks.length === 0
+          ? "N.K. (Nicht kategorisiert)"
+          : nextRubriks.map(displaySingleRubrik).join(", ");
+      const nextIgs = setIgsFieldValue(entry.igs, "Rubrik", rubrikText);
+      const fullPayload = buildEntryPayload(entry, {
+        rubrik: nextRubriks,
+        ...(nextIgs !== null ? { igs: nextIgs } : {}),
+      });
       const res = await fetch(`/api/entries/${encodeURIComponent(entryId)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
