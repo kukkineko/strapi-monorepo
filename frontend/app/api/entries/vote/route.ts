@@ -22,6 +22,7 @@ export async function POST(request: Request) {
 
   const context = await loadUserContext(jwt);
   if (!context?.user) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+  if (context.user.blocked) return NextResponse.json({ error: "Your account has been suspended." }, { status: 403 });
 
   const userId = context.user.userID || String(context.user.id);
   if (!userId) return NextResponse.json({ error: "Cannot identify user." }, { status: 400 });

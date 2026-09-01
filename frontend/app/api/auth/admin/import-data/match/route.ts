@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { getSessionJwt, loadUserContext } from "@/app/lib/auth-server";
 import {
   findBestMatch,
+  gatherCandidates,
   strapiFetchByDocumentId,
   type MatchEntry,
   type MatchConfidence,
@@ -81,14 +82,23 @@ function confidenceForVerdict(entry: MatchEntry): MatchConfidence {
 }
 
 /**
- * Resolve a row. If the AI verdict pinned a `documentId` and we can fetch
- * it from Strapi, use that. Otherwise fall back to the existing heuristic
- * matcher in `findBestMatch`.
+ * Resolve a row. If the AI verdict pinned a `documentId`, it is only trusted
+ * when it's a member of the SAME candidate pool the server itself would
+ * offer for these ids/name — re-derived here via `gatherCandidates` rather
+ * than taking the client's word for it. The verdict stage's own JSON schema
+ * types `documentId` as a bare string with no enum constraint, so without
+ * this check a document that smuggles prompt-injection text into the import
+ * pipeline (see app/lib/import-prompts.ts) could make the model assert an
+ * arbitrary, unrelated documentId with full confidence — this closes that
+ * off at the one place the result gets persisted. Falls back to the
+ * heuristic matcher in `findBestMatch` whenever the verdict is absent,
+ * unresolvable, or not an offered candidate.
  */
 async function resolveRow(
   ids: string[],
   fallbackName: string | null,
   verdictDocumentId: string | undefined,
+  allowNameFallback: boolean,
 ): Promise<{
   entry: MatchEntry | null;
   confidence: MatchConfidence | null;
@@ -96,24 +106,27 @@ async function resolveRow(
   value: string;
   candidates: MatchEntry[];
 }> {
-  if (verdictDocumentId && verdictDocumentId.trim()) {
-    const fetched = await strapiFetchByDocumentId(verdictDocumentId.trim());
-    if (fetched) {
-      return {
-        entry: fetched,
-        confidence: confidenceForVerdict(fetched),
-        field: "ai-verdict",
-        value: ids.join(", ") || fallbackName || "",
-        candidates: [fetched],
-      };
+  const trimmedVerdict = verdictDocumentId?.trim();
+  if (trimmedVerdict) {
+    const candidatePool = await gatherCandidates(ids, fallbackName, allowNameFallback);
+    const isOfferedCandidate = candidatePool.some((c) => c.documentId === trimmedVerdict);
+    if (isOfferedCandidate) {
+      const fetched = await strapiFetchByDocumentId(trimmedVerdict);
+      if (fetched) {
+        return {
+          entry: fetched,
+          confidence: confidenceForVerdict(fetched),
+          field: "ai-verdict",
+          value: ids.join(", ") || fallbackName || "",
+          candidates: [fetched],
+        };
+      }
+    } else {
+      console.warn(
+        "[match] AI verdict documentId is not an offered candidate for this row, ignoring:",
+        trimmedVerdict,
+      );
     }
-    /* Verdict pinned a documentId but Strapi didn't return it (deleted?
-       permissions? typo?). Log loudly and fall back to heuristics so the
-       admin still gets SOMETHING to look at rather than a blank row. */
-    console.warn(
-      "[match] AI verdict documentId not resolvable, falling back:",
-      verdictDocumentId,
-    );
   }
   return findBestMatch(ids, fallbackName);
 }
@@ -144,6 +157,7 @@ export async function POST(req: NextRequest) {
         mainPart.id ?? [],
         mainPart.name ?? null,
         mainPart.documentId,
+        true,
       );
 
       /* Replacements: prefer AI verdict, else ID-only heuristics. No name
@@ -154,6 +168,7 @@ export async function POST(req: NextRequest) {
           replacement.id ?? [],
           null,
           replacement.documentId,
+          false,
         );
         matchedReplacements.push({
           sourceIds: replacement.id ?? [],

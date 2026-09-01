@@ -63,12 +63,37 @@ const DATA_DIR = process.env.VIEW_DATA_DIR
   : path.join(process.cwd(), "data");
 const DATA_FILE = path.join(DATA_DIR, "page-views.json");
 
+/**
+ * `documentId`/`userId` values flow into these stores as plain-object keys
+ * (`store.seen[id]`, `store.totals[id]`, …). A key of "__proto__" on an
+ * ordinary `{}` doesn't create an own property — it resolves through the
+ * `Object.prototype.__proto__` accessor, so `store.seen[id] ?? (store.seen[id]
+ * = {})` can return the live `Object.prototype` object itself, and the next
+ * assignment into it pollutes every plain object in the process. Null-
+ * prototype objects have no such accessor, so the same bracket access is
+ * always a safe own-property lookup regardless of what key reaches it.
+ */
+function emptyRecord<T>(): Record<string, T> {
+  return Object.create(null) as Record<string, T>;
+}
+
 function emptyStore(): ViewStore {
-  return { version: 2, totals: {}, last: {}, seen: {}, events: [], updatedAt: new Date(0).toISOString() };
+  return {
+    version: 2,
+    totals: emptyRecord(),
+    last: emptyRecord(),
+    seen: emptyRecord(),
+    events: [],
+    updatedAt: new Date(0).toISOString(),
+  };
 }
 
 function asRecord<T>(value: unknown): Record<string, T> {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, T>) : {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) return emptyRecord();
+  // Copy onto a null-prototype target so a previously-persisted "__proto__"/
+  // "constructor" key (from before this fix) can't resurrect the pollution
+  // path on read either.
+  return Object.assign(emptyRecord<T>(), value as Record<string, T>);
 }
 
 /** Read + parse the store, migrating the old v1 shape and tolerating corruption. */
@@ -101,7 +126,7 @@ export async function readViewStore(): Promise<ViewStore> {
         version: 2,
         totals: asRecord<number>(parsed.counts),
         last: asRecord<string>(parsed.last),
-        seen: {},
+        seen: emptyRecord(),
         events: [],
         updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : new Date(0).toISOString(),
       };
@@ -139,7 +164,7 @@ export function recordView(documentId: string, userId: string): Promise<boolean>
     const store = await readViewStore();
     const now = Date.now();
 
-    const seenForItem = store.seen[id] ?? (store.seen[id] = {});
+    const seenForItem = store.seen[id] ?? (store.seen[id] = emptyRecord<number>());
     const lastCounted = seenForItem[uid];
     if (typeof lastCounted === "number" && now - lastCounted < DAY_MS) {
       // This user already counted for this item within the last 24h.

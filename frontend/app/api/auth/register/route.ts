@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 import { registerUser, setSessionJwt } from "@/app/lib/auth-server";
+import { clientIpFromHeaders, isRateLimited } from "@/app/lib/rate-limit";
+
+const REGISTER_LIMIT = 6;
+const REGISTER_WINDOW_MS = 60 * 60 * 1000;
 
 function normalizeSlug(value: string): string {
   const lowered = value.trim().toLowerCase();
@@ -46,6 +50,14 @@ function buildUsernameCandidates(firstName: string, surname: string): string[] {
 }
 
 export async function POST(request: Request) {
+  const ip = clientIpFromHeaders(request.headers);
+  if (isRateLimited(`register:${ip}`, REGISTER_LIMIT, REGISTER_WINDOW_MS)) {
+    return NextResponse.json(
+      { error: "Too many registration attempts. Please wait a while and try again." },
+      { status: 429 },
+    );
+  }
+
   const body = (await request.json().catch(() => null)) as {
     name?: unknown;
     surname?: unknown;

@@ -11,6 +11,14 @@ export async function POST() {
   const user = await getStrapiMe(jwt);
   if (!user?.administrator) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
+  // This triggers site-wide downtime for every user with a single POST and no
+  // confirmation step, unlike other admin write routes it doesn't fit the
+  // entry-scoped audit-log schema (no entryId/section to revert) — so record
+  // who triggered it straight to the server log instead, for traceability.
+  console.log(
+    `[rebuild] Triggered by ${user.email || user.userID || `user #${user.id}`} at ${new Date().toISOString()}`,
+  );
+
   return new Response(
     new ReadableStream({
       start(controller) {

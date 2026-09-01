@@ -21,8 +21,13 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  if (!id?.trim()) {
-    return NextResponse.json({ ok: false, error: "Missing id." }, { status: 400 });
+  const trimmedId = id?.trim() ?? "";
+  // Strapi documentIds are fixed-format alphanumeric strings. Reject anything
+  // else outright — this value is later used as an object key in the view
+  // store (app/lib/page-views.ts), so a stray "__proto__"/"constructor" must
+  // never reach it, even though that store is itself hardened against it.
+  if (!trimmedId || !/^[a-zA-Z0-9]+$/.test(trimmedId)) {
+    return NextResponse.json({ ok: false, error: "Invalid id." }, { status: 400 });
   }
 
   const jwt = await getSessionJwt();
@@ -30,11 +35,12 @@ export async function POST(
 
   const context = await loadUserContextCached(jwt);
   if (!context?.user) return NextResponse.json({ ok: false }, { status: 401 });
+  if (context.user.blocked) return NextResponse.json({ ok: false }, { status: 403 });
 
   const userId = context.user.userID || String(context.user.id);
 
   try {
-    const counted = await recordView(id, userId);
+    const counted = await recordView(trimmedId, userId);
     return NextResponse.json({ ok: true, counted });
   } catch {
     // Never surface a counter failure to the reader.

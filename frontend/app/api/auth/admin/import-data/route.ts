@@ -28,6 +28,10 @@ export const maxDuration = 300;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY ?? "";
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY ?? "";
 
+const MAX_IMPORT_FILES = 20;
+const MAX_IMPORT_FILE_BYTES = 50 * 1024 * 1024; // 50 MB
+const MAX_IMPORT_TOTAL_BYTES = 150 * 1024 * 1024; // 150 MB per request
+
 /* ── helpers shared between stages ──────────────────────────────────────── */
 
 /** Stage 2 is configured with a strict JSON schema, but we still treat the
@@ -147,7 +151,6 @@ function httpsJSON<T>(
         port: 443,
         path,
         method,
-        rejectUnauthorized: false,
         headers: {
           ...headers,
           ...(payload
@@ -223,7 +226,6 @@ function multipartUpload(
         port: 443,
         path,
         method: "POST",
-        rejectUnauthorized: false,
         headers: {
           ...headers,
           "Content-Type": `multipart/form-data; boundary=${boundary}`,
@@ -728,25 +730,56 @@ export async function POST(req: NextRequest) {
     console.log("[import-data] Parsing form data…");
     const formData = await req.formData();
 
-    /* Collect files into memory (we may need to upload them to multiple
-       providers if Stage 1 and Stage 2 use different APIs). */
-    const files: UploadedFile[] = [];
-    for (const [key, value] of formData.entries()) {
-      if (key === "files" && value instanceof File) {
-        const buf = Buffer.from(await value.arrayBuffer());
-        files.push({
-          name: value.name,
-          mime: value.type || "application/octet-stream",
-          buf,
-        });
-      }
-    }
+    /* Size/count checks run BEFORE buffering anything into memory or relaying
+       to a paid AI provider — this pipeline has no other limit anywhere in
+       the stack (no next.config.ts body-size config, self-hosted so no
+       platform-level cap either), so without this a single request could
+       exhaust worker memory or run up API costs. */
+    const rawFiles = formData
+      .getAll("files")
+      .filter((f): f is File => f instanceof File);
 
-    if (files.length === 0) {
+    if (rawFiles.length === 0) {
       return NextResponse.json(
         { error: "At least one file is required." },
         { status: 400 },
       );
+    }
+    if (rawFiles.length > MAX_IMPORT_FILES) {
+      return NextResponse.json(
+        { error: `Too many files in one import (max ${MAX_IMPORT_FILES}).` },
+        { status: 413 },
+      );
+    }
+    let totalBytes = 0;
+    for (const f of rawFiles) {
+      if (f.size > MAX_IMPORT_FILE_BYTES) {
+        return NextResponse.json(
+          {
+            error: `"${f.name}" exceeds the ${MAX_IMPORT_FILE_BYTES / (1024 * 1024)} MB per-file limit.`,
+          },
+          { status: 413 },
+        );
+      }
+      totalBytes += f.size;
+    }
+    if (totalBytes > MAX_IMPORT_TOTAL_BYTES) {
+      return NextResponse.json(
+        { error: `Import exceeds the ${MAX_IMPORT_TOTAL_BYTES / (1024 * 1024)} MB total limit.` },
+        { status: 413 },
+      );
+    }
+
+    /* Collect files into memory (we may need to upload them to multiple
+       providers if Stage 1 and Stage 2 use different APIs). */
+    const files: UploadedFile[] = [];
+    for (const value of rawFiles) {
+      const buf = Buffer.from(await value.arrayBuffer());
+      files.push({
+        name: value.name,
+        mime: value.type || "application/octet-stream",
+        buf,
+      });
     }
 
     /* ── PDF text pre-extraction ────────────────────────────────────────

@@ -17,9 +17,16 @@ export async function getSessionJwt(): Promise<string | null> {
 
 export async function setSessionJwt(jwt: string) {
   const cookieStore = await cookies();
+  // Opt OUT rather than opt IN: production defaults to secure so a missing
+  // COOKIE_SECURE env var can't silently ship the session cookie over plain
+  // HTTP. Only an explicit "false" (or non-production) turns it off.
+  const secure =
+    process.env.NODE_ENV === "production"
+      ? process.env.COOKIE_SECURE !== "false"
+      : process.env.COOKIE_SECURE === "true";
   cookieStore.set(AUTH_COOKIE_NAME, jwt, {
     httpOnly: true,
-    secure: process.env.COOKIE_SECURE === "true",
+    secure,
     sameSite: "lax",
     path: "/",
     maxAge: 60 * 60 * 24 * 7,
