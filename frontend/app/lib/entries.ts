@@ -143,7 +143,7 @@ const LIST_FIELDS_QUERY =
 // for a thumbnail.
 const NEIGHBOR_FIELDS_QUERY =
   "?fields[0]=id&fields[1]=documentId&fields[2]=title" +
-  "&fields[3]=artNr&fields[4]=EAN&fields[5]=desc&populate[0]=pictures";
+  "&fields[3]=artNr&fields[4]=EAN&populate[0]=pictures";
 const LIST_PAGE_SIZE = 100;
 // The listing page loads only this many of the most-recently-updated entries
 // up front; everything else is reachable via the server search endpoint.
@@ -877,32 +877,6 @@ export async function listEntriesBySection(section: string): Promise<Entry[]> {
   }
 }
 
-/**
- * Relevance score for a search hit (higher = better). artNr / EAN matches are
- * ranked ABOVE title/tag matches so that searching an article-number fragment
- * (e.g. "PFL" → "441612PFL") surfaces the numbered item even when the same
- * substring also appears in many product titles (German "Pflege…" = care).
- */
-function scoreSearchRelevance(entry: Entry, q: string, tokens: string[]): number {
-  const title = entry.title.toLowerCase();
-  const artNr = (entry.artNr ?? "").toLowerCase();
-  const ean = (entry.EAN ?? "").toLowerCase();
-  const tags = (entry.tags ?? "").toLowerCase();
-
-  if (artNr === q || ean === q) return 100;
-  if (title === q) return 95;
-  if (artNr.startsWith(q) || ean.startsWith(q)) return 90;
-  if (title.startsWith(q)) return 80;
-  if (artNr.includes(q) || ean.includes(q)) return 70;
-  // Multi-token: every token lives somewhere in artNr/EAN ("441612 pfl").
-  if (tokens.length > 1 && tokens.every((t) => artNr.includes(t) || ean.includes(t))) return 65;
-  if (title.includes(q)) return 60;
-  if (tags.includes(q)) return 50;
-  const hay = `${title} ${artNr} ${ean} ${tags}`;
-  if (tokens.every((t) => hay.includes(t))) return 30;
-  return 10;
-}
-
 export async function searchEntries(query: string, limit = 24): Promise<Entry[]> {
   const trimmed = query.trim();
   if (!trimmed) {
@@ -935,15 +909,15 @@ export async function searchEntries(query: string, limit = 24): Promise<Entry[]>
   }
 
   // Token-based AND-of-ORs: every whitespace-separated token must match at
-  // least one field (title / artNr / EAN / documentId / tags / desc / IGS). This
-  // lets multi-word queries match across fields (e.g. "pump 230v" → title
-  // contains "pump" AND artNr contains "230v"), searches tokenized tags, and
-  // pushes all the matching work into Strapi so the entire catalogue is searched
-  // without loading it into memory. A single-token query collapses to the old
-  // behaviour. IGS is a JSON blob holding internal designations (e.g. the
-  // "Bezeichnung 2" value "5MPRC-3/5TPEC-3 (…)"), so a $containsi over its raw
-  // text lets those internal codes surface the item too.
-  const SEARCH_FIELDS = ["title", "artNr", "EAN", "documentId", "tags", "desc", "IGS"] as const;
+  // least one field (title / artNr / EAN / documentId / tags / desc). This lets
+  // multi-word queries match across fields (e.g. "pump 230v" → title contains
+  // "pump" AND artNr contains "230v"), searches tokenized tags, and pushes all
+  // the matching work into Strapi so the entire catalogue is searched without
+  // loading it into memory. A single-token query collapses to the old behaviour.
+  // `desc` is included so numbers embedded in the description — e.g. the
+  // "7753050" in `2"AG (7753050)` — are findable, even though $containsi is a
+  // substring match rather than a whole-word one.
+  const SEARCH_FIELDS = ["title", "artNr", "EAN", "documentId", "tags", "desc"] as const;
   const tokens = trimmed.split(/\s+/).filter(Boolean).slice(0, 8);
   const filterQuery = tokens
     .flatMap((token, ti) => {
@@ -955,16 +929,10 @@ export async function searchEntries(query: string, limit = 24): Promise<Entry[]>
     })
     .join("&");
 
-  // Over-fetch candidates so we can rank artNr/EAN matches to the top before
-  // slicing to the caller's limit — otherwise a common substring shared by many
-  // product titles buries the numbered-item (artNr/EAN) matches, and a small
-  // preview limit (e.g. 6) would never show them.
-  const candidateSize = Math.min(100, Math.max(safeLimit, 50));
-
   const request = (async () => {
     const res = await fetch(
       `${STRAPI_URL}/api/entries${POPULATE_QUERY}` +
-        `&pagination[pageSize]=${candidateSize}` +
+        `&pagination[pageSize]=${safeLimit}` +
         `&${filterQuery}`,
       {
         headers: getHeaders(),
@@ -983,26 +951,17 @@ export async function searchEntries(query: string, limit = 24): Promise<Entry[]>
       return true;
     });
 
-    // Rank so artNr/EAN hits come first, then keep only the requested count.
-    const qLower = trimmed.toLowerCase();
-    const tokLower = tokens.map((t) => t.toLowerCase());
-    const ranked = deduplicated
-      .map((entry) => ({ entry, score: scoreSearchRelevance(entry, qLower, tokLower) }))
-      .sort((a, b) => b.score - a.score)
-      .map((s) => s.entry)
-      .slice(0, safeLimit);
-
     searchEntriesCache.set(cacheKey, {
-      value: ranked,
+      value: deduplicated,
       expiresAt: Date.now() + CACHE_TTL_MS,
     });
     pruneSearchCache();
 
-    for (const entry of ranked) {
+    for (const entry of deduplicated) {
       cacheEntry(entry);
     }
 
-    return ranked;
+    return deduplicated;
   })();
 
   searchEntriesInFlight.set(cacheKey, request);
@@ -1235,6 +1194,52 @@ export async function updateEntry(id: string, payload: EntryPayload): Promise<En
   return normalized;
 }
 
+/**
+ * Server-side content dedup: return the id of an existing media file whose
+ * bytes are identical to `file`, or null. Prefilters by original name + size
+ * (cheap) then verifies with a sha256 of the actual content, so we never reuse
+ * a coincidental name/size match. Identical assets used to be re-uploaded once
+ * per entry, bloating the library ~3x — this collapses them to one record.
+ */
+async function findExistingMedia(file: File): Promise<number | null> {
+  try {
+    const sizeKb = Math.round((file.size / 1000) * 100) / 100;
+    const url =
+      `${STRAPI_URL}/api/upload/files` +
+      `?filters[name][$eq]=${encodeURIComponent(file.name)}` +
+      `&sort=id:asc&pagination[pageSize]=100`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${process.env.STRAPI_TOKEN}` },
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const list = (await res.json()) as Array<{ id: number; name: string; size: number; url: string }>;
+    const candidates = (Array.isArray(list) ? list : []).filter(
+      (f) => f.name === file.name && Math.abs((f.size ?? 0) - sizeKb) < 0.02,
+    );
+    if (candidates.length === 0) return null;
+
+    const { createHash } = await import("node:crypto");
+    const wantHash = createHash("sha256").update(Buffer.from(await file.arrayBuffer())).digest("hex");
+    for (const f of candidates) {
+      try {
+        const fres = await fetch(`${STRAPI_URL}${f.url}`, {
+          headers: { Authorization: `Bearer ${process.env.STRAPI_TOKEN}` },
+          cache: "no-store",
+        });
+        if (!fres.ok) continue;
+        const gotHash = createHash("sha256").update(Buffer.from(await fres.arrayBuffer())).digest("hex");
+        if (gotHash === wantHash) return f.id;
+      } catch {
+        /* ignore and try the next candidate */
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export async function uploadMedia(files: File[]): Promise<number[]> {
   const formData = new FormData();
   files.forEach((file) => {
@@ -1254,22 +1259,47 @@ export async function uploadMedia(files: File[]): Promise<number[]> {
   }
 
   // ── Server-side: upload straight to Strapi with the server-only token.
-  const res = await fetch(`${STRAPI_URL}/api/upload`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env.STRAPI_TOKEN}`,
-    },
-    body: formData,
-  });
+  // Reuse existing records for byte-identical content instead of creating
+  // duplicates; only genuinely new files are uploaded. Order is preserved.
+  const results: number[] = new Array(files.length);
+  const pending: { index: number; file: File }[] = [];
 
-  if (!res.ok) {
-    const error = await res.json();
-    console.error("Media upload error:", error);
-    throw new Error("Failed to upload media.");
+  await Promise.all(
+    files.map(async (file, i) => {
+      const existing = await findExistingMedia(file);
+      if (existing != null) results[i] = existing;
+      else pending.push({ index: i, file });
+    }),
+  );
+
+  if (pending.length > 0) {
+    const uploadForm = new FormData();
+    pending.forEach(({ file }) => uploadForm.append("files", file));
+
+    const res = await fetch(`${STRAPI_URL}/api/upload`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.STRAPI_TOKEN}`,
+      },
+      body: uploadForm,
+    });
+
+    if (!res.ok) {
+      const error = await res.json();
+      console.error("Media upload error:", error);
+      throw new Error("Failed to upload media.");
+    }
+
+    const data = (await res.json()) as Array<{ id: number }>;
+    if (!Array.isArray(data) || data.length !== pending.length) {
+      throw new Error("Unexpected upload response from Strapi.");
+    }
+    pending.forEach(({ index }, k) => {
+      results[index] = data[k].id;
+    });
   }
 
-  const data = (await res.json()) as Array<{ id: number }>;
-  return data.map((item) => item.id);
+  return results;
 }
 
 export async function getMediaById(id: number): Promise<EntryMedia | null> {

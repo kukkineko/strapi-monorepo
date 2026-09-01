@@ -13,8 +13,9 @@
  *   node scripts/assign-docs-bulk.mjs [--dry-run] [--folder <path>] [--include-videos]
  */
 
-import fs   from "fs";
-import path from "path";
+import fs     from "fs";
+import path   from "path";
+import crypto from "crypto";
 import { readFile } from "fs/promises";
 
 /* ── Config ───────────────────────────────────────────────────────────────── */
@@ -45,7 +46,53 @@ if (!STRAPI_TOKEN) { console.error("STRAPI_TOKEN missing in .env.local"); proces
 
 const AUTH_HEADERS = { Authorization: `Bearer ${STRAPI_TOKEN}` };
 
+/* ── Upload dedup cache ─────────────────────────────────────────────────────
+ * Maps sha256(content) → mediaId so re-runs (and the same file assigned to many
+ * entries) reuse one record instead of re-uploading. Persisted next to this
+ * script; delete .upload-cache.json to force fresh uploads.                     */
+const CACHE_PATH = new URL(".upload-cache.json", import.meta.url);
+let uploadCache = {};
+try { uploadCache = JSON.parse(fs.readFileSync(CACHE_PATH, "utf-8")); } catch { uploadCache = {}; }
+function saveCache() {
+  try { fs.writeFileSync(CACHE_PATH, JSON.stringify(uploadCache, null, 2)); } catch { /* ignore */ }
+}
+
 /* ── Helpers ──────────────────────────────────────────────────────────────── */
+
+/** True if a media id still exists in the library. */
+async function mediaExists(id) {
+  try {
+    const res = await fetch(`${STRAPI_URL}/api/upload/files/${id}`, { headers: AUTH_HEADERS });
+    return res.ok;
+  } catch { return false; }
+}
+
+/**
+ * Find an existing library file that is byte-identical to `buffer`. Prefilters
+ * by name + size, then verifies by sha256 of the actual content so a shared
+ * upload name (e.g. "Sicherheitsdatenblaetter.pdf") can't cause a false reuse.
+ */
+async function findExistingByContent(hash, uploadName, sizeBytes) {
+  const sizeKb = Math.round((sizeBytes / 1000) * 100) / 100;
+  try {
+    const url =
+      `${STRAPI_URL}/api/upload/files` +
+      `?filters[name][$eq]=${encodeURIComponent(uploadName)}` +
+      `&sort=id:asc&pagination[pageSize]=100`;
+    const res = await fetch(url, { headers: AUTH_HEADERS });
+    if (!res.ok) return null;
+    const list = await res.json();
+    if (!Array.isArray(list)) return null;
+    for (const f of list) {
+      if (f.name !== uploadName || Math.abs((f.size ?? 0) - sizeKb) >= 0.02) continue;
+      const fres = await fetch(`${STRAPI_URL}${f.url}`, { headers: AUTH_HEADERS });
+      if (!fres.ok) continue;
+      const buf = Buffer.from(await fres.arrayBuffer());
+      if (crypto.createHash("sha256").update(buf).digest("hex") === hash) return f.id;
+    }
+    return null;
+  } catch { return null; }
+}
 
 /** Parse artNrs from a filename — numeric underscore-separated tokens. */
 function parseArtNrs(filename) {
@@ -84,9 +131,26 @@ async function findByArtNr(artNr) {
   }).filter((e) => e.documentId);
 }
 
-/** Upload a file buffer to Strapi, naming it `uploadName`. Returns media id. */
+/**
+ * Upload a file to Strapi named `uploadName`, reusing an existing record when
+ * the content is byte-identical. Returns { id, reused }.
+ */
 async function uploadFile(filePath, uploadName) {
   const buffer = await readFile(filePath);
+  const hash   = crypto.createHash("sha256").update(buffer).digest("hex");
+
+  // 1) content-hash cache — idempotent across runs
+  const cached = uploadCache[hash];
+  if (cached != null && await mediaExists(cached)) return { id: cached, reused: true };
+
+  // 2) an existing library file with identical content (verified)
+  const existing = await findExistingByContent(hash, uploadName, buffer.length);
+  if (existing != null) {
+    uploadCache[hash] = existing; saveCache();
+    return { id: existing, reused: true };
+  }
+
+  // 3) genuinely new — upload it
   const ext    = path.extname(filePath).toLowerCase();
   const mime   = ext === ".pdf"  ? "application/pdf"
                : ext === ".mp4"  ? "video/mp4"
@@ -109,7 +173,8 @@ async function uploadFile(filePath, uploadName) {
   const data = await res.json();
   const id   = Array.isArray(data) ? data[0]?.id : data?.id;
   if (!id) throw new Error("No media id in upload response.");
-  return id;
+  uploadCache[hash] = id; saveCache();
+  return { id, reused: false };
 }
 
 /** Append a doc entry to the given Strapi entry. Skips if already present. */
@@ -154,7 +219,7 @@ async function main() {
     .filter((d) => d.isDirectory() && !SKIP_FOLDERS.has(d.name))
     .map((d) => d.name);
 
-  const stats = { uploaded: 0, assigned: 0, skipped: 0, noArtNr: 0, noMatch: 0, errors: 0 };
+  const stats = { uploaded: 0, reused: 0, assigned: 0, skipped: 0, noArtNr: 0, noMatch: 0, errors: 0 };
   const errors = [];
 
   for (const folder of subfolders) {
@@ -205,12 +270,13 @@ async function main() {
         continue;
       }
 
-      // Upload once, assign to all matches
+      // Upload once (or reuse an identical existing file), assign to all matches
       let mediaId;
       try {
-        mediaId = await uploadFile(filePath, uploadName);
-        stats.uploaded++;
-        console.log(`    uploaded → mediaId=${mediaId}`);
+        const up = await uploadFile(filePath, uploadName);
+        mediaId = up.id;
+        if (up.reused) { stats.reused++; console.log(`    reused   → mediaId=${mediaId}`); }
+        else           { stats.uploaded++; console.log(`    uploaded → mediaId=${mediaId}`); }
       } catch (err) {
         console.error(`    ERROR uploading: ${err.message}`);
         errors.push({ file: filename, error: err.message });
@@ -235,6 +301,7 @@ async function main() {
 
   console.log("\n══════════════════════════════════");
   console.log(`Uploaded : ${stats.uploaded}`);
+  console.log(`Reused   : ${stats.reused}`);
   console.log(`Assigned : ${stats.assigned}`);
   console.log(`Skipped  : ${stats.skipped}`);
   console.log(`No artNr : ${stats.noArtNr}`);

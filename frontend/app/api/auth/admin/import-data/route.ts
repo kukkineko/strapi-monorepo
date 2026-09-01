@@ -437,6 +437,14 @@ type AnthropicResponseObj = {
   id: string;
   stop_reason: string;
   content: AnthropicContentBlock[];
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    /** Tokens written to the cache this request (~1.25× cost). */
+    cache_creation_input_tokens?: number;
+    /** Tokens served from the cache this request (~0.1× cost). */
+    cache_read_input_tokens?: number;
+  };
   error?: { message?: string };
 };
 
@@ -517,8 +525,28 @@ async function runAnthropicStage(
 
   const body: Record<string, unknown> = {
     model: stage.model,
-    max_tokens: 8192,
-    system: stage.prompt,
+    max_tokens: 16000,
+    /* Claude Opus 5 turns thinking ON by default, and max_tokens caps thinking
+     * + output together. This pipeline wants deterministic extraction /
+     * structured output, not visible reasoning — and adaptive thinking is
+     * incompatible with the forced tool_choice used by the schema stages. Turn
+     * it off explicitly (accepted at the default "high" effort on Opus 5). */
+    thinking: { type: "disabled" },
+    /* Prompt caching: the per-stage system prompt is large and byte-identical
+     * on every request, so mark it as a cache breakpoint. Render order is
+     * tools → system → messages, so a breakpoint on the (single) system block
+     * caches the tool schema AND the system prompt together as one prefix; the
+     * per-request user content (documents / prior-stage text) stays uncached
+     * after it. The default 5-minute TTL comfortably covers the per-file
+     * Stage 1 fallback loop and back-to-back import runs. No beta header
+     * needed — prompt caching is GA. */
+    system: [
+      {
+        type: "text",
+        text: stage.prompt,
+        cache_control: { type: "ephemeral" },
+      },
+    ],
     messages: [{ role: "user", content }],
   };
 
@@ -551,6 +579,23 @@ async function runAnthropicStage(
     ANTHROPIC_HEADERS,
     body,
   );
+
+  /* Cache observability: cache_read > 0 means the system+tools prefix was
+     served from cache; cache_creation > 0 means this request wrote it. If both
+     stay 0 across repeated runs, a silent invalidator changed the prefix. */
+  const u = response.usage;
+  if (u) {
+    console.log(
+      "[import-data] Anthropic usage · input:",
+      u.input_tokens ?? 0,
+      "· output:",
+      u.output_tokens ?? 0,
+      "· cache write:",
+      u.cache_creation_input_tokens ?? 0,
+      "· cache read:",
+      u.cache_read_input_tokens ?? 0,
+    );
+  }
 
   if (stage.schema) {
     const toolBlock = response.content.find((b) => b.type === "tool_use");

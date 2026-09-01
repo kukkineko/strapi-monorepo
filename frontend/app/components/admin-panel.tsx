@@ -1533,6 +1533,9 @@ function DBStatsOverview() {
   const [fixLinksState, setFixLinksState] = useState<"idle" | "running" | "done" | "error">("idle");
   const [fixLinksResult, setFixLinksResult] = useState<{ updated: number; backLinksAdded: number } | null>(null);
   const [fixLinksError, setFixLinksError] = useState("");
+  const [fixConfState, setFixConfState] = useState<"idle" | "running" | "done" | "error">("idle");
+  const [fixConfResult, setFixConfResult] = useState<{ updated: number; fixed: number } | null>(null);
+  const [fixConfError, setFixConfError] = useState("");
 
   async function handleFixLinks() {
     if (fixLinksState === "running") return;
@@ -1552,6 +1555,28 @@ function DBStatsOverview() {
     } catch (err) {
       setFixLinksError(err instanceof Error ? err.message : "Fix failed.");
       setFixLinksState("error");
+    }
+  }
+
+  async function handleFixConfidence() {
+    if (fixConfState === "running") return;
+    if (!window.confirm(
+      "This will assign a default 50% confidence to every link that has no confidence score yet.\n\n" +
+      "Links that already have a score are left unchanged. Proceed?"
+    )) return;
+    setFixConfState("running");
+    setFixConfResult(null);
+    setFixConfError("");
+    try {
+      const res = await fetch("/api/entries/fix-confidence", { method: "POST" });
+      const data = (await res.json()) as { updated?: number; fixed?: number; error?: string };
+      if (!res.ok) throw new Error(data.error ?? "Fix failed.");
+      setFixConfResult({ updated: data.updated ?? 0, fixed: data.fixed ?? 0 });
+      setFixConfState("done");
+      void load(true);
+    } catch (err) {
+      setFixConfError(err instanceof Error ? err.message : "Fix failed.");
+      setFixConfState("error");
     }
   }
 
@@ -1898,6 +1923,35 @@ function DBStatsOverview() {
             </dd>
           </div>
         </dl>
+
+        {/* Assign a default 50% confidence to links that have none */}
+        {(stats.linksWithoutConfidence > 0 || fixConfState === "done") && (
+          <div style={{ padding: "0 1rem 1rem", display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
+            <button
+              type="button"
+              className={[
+                "wiki-admin-db-btn",
+                fixConfState === "running" ? "loading" : "",
+                fixConfState === "done"    ? "done"    : "",
+              ].filter(Boolean).join(" ")}
+              disabled={fixConfState === "running" || stats.linksWithoutConfidence === 0}
+              onClick={() => void handleFixConfidence()}
+            >
+              {fixConfState === "running" && <span className="wiki-admin-spinner" aria-hidden="true" />}
+              {fixConfState === "done"    ? "✓ Confidence fixed!" :
+               fixConfState === "running" ? "Fixing…"             : `Fix ${fmt(stats.linksWithoutConfidence)} link${stats.linksWithoutConfidence !== 1 ? "s" : ""} → 50%`}
+            </button>
+            {fixConfResult && fixConfState === "done" && (
+              <span style={{ fontSize: "0.82rem", color: "#10b981" }}>
+                Set {fixConfResult.fixed} link{fixConfResult.fixed !== 1 ? "s" : ""} to 50% across {fixConfResult.updated} entr{fixConfResult.updated !== 1 ? "ies" : "y"}.
+              </span>
+            )}
+            {fixConfState === "error" && (
+              <span style={{ fontSize: "0.82rem", color: "#dc2626" }}>{fixConfError}</span>
+            )}
+          </div>
+        )}
+
         {stats.linksWithConfidence > 0 && (
           <div style={{ padding: "0 1rem 1rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
             {[
@@ -4920,6 +4974,7 @@ type DocFileLocal = {
   filename:     string;   // basename (used as key)
   relativePath: string;   // path relative to root folder, for display
   artNrs:       string[];
+  searchName:   string;   // filename-derived title search (used when no artNr)
   docType:      string;
   matches:      DocMatch[];
 };
@@ -4991,29 +5046,47 @@ export function AssignDocsContent() {
           ? subfolders.join(" / ")
           : fromFile.docType;
         const relativePath = parts.slice(1).join("/"); // strip root folder
-        return { file: f, filename: f.name, relativePath, artNrs: fromFile.artNrs, docType };
+        // When the filename carries no article number, fall back to searching
+        // the DB by the filename itself (underscores → spaces) against titles.
+        const searchName = fromFile.artNrs.length === 0
+          ? f.name.replace(/\.pdf$/i, "").replace(/_/g, " ").trim()
+          : "";
+        return { file: f, filename: f.name, relativePath, artNrs: fromFile.artNrs, searchName, docType };
       });
 
-      // Collect all unique artNrs across all files.
+      // Collect unique artNrs and filename searches across all files.
       const allArtNrs = Array.from(new Set(parsed.flatMap((p) => p.artNrs)));
+      const allNames  = Array.from(new Set(parsed.map((p) => p.searchName).filter(Boolean)));
 
-      // Ask the server to resolve artNrs → Strapi entries (keeps token server-side).
-      let matchMap: Record<string, DocMatch[]> = {};
-      if (allArtNrs.length > 0) {
+      // Ask the server to resolve artNrs / names → Strapi entries (keeps token server-side).
+      let matchMap:     Record<string, DocMatch[]> = {};
+      let nameMatchMap: Record<string, DocMatch[]> = {};
+      if (allArtNrs.length > 0 || allNames.length > 0) {
         const params = new URLSearchParams();
         allArtNrs.forEach((nr) => params.append("artNrs[]", nr));
+        allNames.forEach((n)  => params.append("names[]",  n));
         const res  = await fetch(`/api/auth/admin/assign-docs?${params.toString()}`);
-        const body = (await res.json()) as { matches?: Record<string, DocMatch[]>; error?: string };
+        const body = (await res.json()) as {
+          matches?:     Record<string, DocMatch[]>;
+          nameMatches?: Record<string, DocMatch[]>;
+          error?:       string;
+        };
         if (!res.ok) throw new Error(body.error ?? "Lookup failed.");
-        matchMap = body.matches ?? {};
+        matchMap     = body.matches     ?? {};
+        nameMatchMap = body.nameMatches ?? {};
       }
 
-      // Build per-file match lists (deduplicated by documentId).
+      // Build per-file match lists (deduplicated by documentId). Files with an
+      // article number match on artNr; files without one fall back to the
+      // filename→title search.
       const result: DocFileLocal[] = parsed.map((p) => {
         const seen = new Set<string>();
         const matches: DocMatch[] = [];
-        for (const nr of p.artNrs) {
-          for (const m of matchMap[nr] ?? []) {
+        const pools = p.artNrs.length > 0
+          ? p.artNrs.map((nr) => matchMap[nr] ?? [])
+          : [nameMatchMap[p.searchName] ?? []];
+        for (const pool of pools) {
+          for (const m of pool) {
             if (!seen.has(m.documentId)) { seen.add(m.documentId); matches.push(m); }
           }
         }
@@ -5119,7 +5192,7 @@ export function AssignDocsContent() {
   /* ── Derived counts ── */
   const eligibleCount  = files.filter((f) => f.matches.length > 0).length;
   const noMatchCount   = files.filter((f) => f.matches.length === 0 && f.artNrs.length > 0).length;
-  const noArtNrCount   = files.filter((f) => f.artNrs.length === 0).length;
+  const noArtNrCount   = files.filter((f) => f.matches.length === 0 && f.artNrs.length === 0).length;
   const allEligibleSel = eligibleCount > 0 && files.filter((f) => f.matches.length > 0).every((f) => selected.has(f.relativePath));
 
   return (
@@ -5155,8 +5228,9 @@ export function AssignDocsContent() {
 
       <p className="wiki-assign-docs-hint">
         PDFs can be organised in subfolders — the subfolder name becomes the document type.
-        Filenames must start with article numbers like <code>03135_03136_Installationsanleitung.pdf</code>.
+        Filenames ideally start with article numbers like <code>03135_03136_Installationsanleitung.pdf</code>.
         If a file sits directly in the root folder, the part after the numbers is used as the type instead.
+        When a filename has no article number, the product is looked up by the filename against product names instead.
       </p>
 
       {scanError && <p className="wiki-error">{scanError}</p>}
@@ -5169,7 +5243,7 @@ export function AssignDocsContent() {
               {files.length} PDF{files.length !== 1 ? "s" : ""}
               {eligibleCount > 0 && ` · ${eligibleCount} matched`}
               {noMatchCount  > 0 && ` · ${noMatchCount} unmatched`}
-              {noArtNrCount  > 0 && ` · ${noArtNrCount} no article numbers`}
+              {noArtNrCount  > 0 && ` · ${noArtNrCount} no match`}
             </span>
             {eligibleCount > 0 && (
               <button type="button" className="wiki-assign-docs-toggle-all" onClick={toggleAll}>
@@ -5199,6 +5273,8 @@ export function AssignDocsContent() {
                     <span className="wiki-assign-docs-doctype">{f.docType}</span>
                     {f.artNrs.length > 0 ? (
                       <span className="wiki-assign-docs-artnrs">{f.artNrs.join(", ")}</span>
+                    ) : hasMatches ? (
+                      <span className="wiki-assign-docs-artnrs">by name: “{f.searchName}”</span>
                     ) : (
                       <span className="wiki-assign-docs-warn">No article numbers in filename</span>
                     )}

@@ -106,8 +106,8 @@ function shortDesc(entry: Entry): string {
  *    90  title starts with query
  *    80  artNr or EAN exact match
  *    70  artNr or EAN starts with query
- *    65  full query found in artNr / EAN (article-number fragments win)
  *    60  full query found as substring in title
+ *    50  full query found in artNr / EAN
  *    40  full query found in tags
  *    35  all tokens found individually in the tags (tokenized tag match)
  *    20  all tokens found individually in the title
@@ -133,11 +133,10 @@ function scoreRelevance(entry: Entry, query: string, tokens: string[]): number {
   if (artNr === q || ean === q) return 80;
   // artNr or EAN starts with query
   if (artNr.startsWith(q) || ean.startsWith(q)) return 70;
-  // Full query found in artNr / EAN — ranked ABOVE a title substring so an
-  // article-number fragment ("PFL" → "441612PFL") surfaces above title hits.
-  if (artNr.includes(q) || ean.includes(q)) return 65;
   // Full query found as substring in title
   if (title.includes(q)) return 60;
+  // Full query found in artNr / EAN
+  if (artNr.includes(q) || ean.includes(q)) return 50;
   // Full query found in tags
   if (tags.includes(q)) return 40;
   // All query tokens found individually in the tags

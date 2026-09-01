@@ -162,8 +162,8 @@ export const VERDICT_PARTS_SCHEMA = {
  * ───────────────────────────────────────────────────────────────────────── */
 
 export const STAGE_1: StageConfig = {
-  provider: "openai",
-  model: "gpt-5.5",
+  provider: "anthropic",
+  model: "claude-opus-5",
   prompt: `You are a text extraction agent. You may be given ONE OR MORE images, files, spreadsheets, OR pre-extracted text blocks in the SAME request (they are batched together to save tokens — do not assume they are part of the same document unless context says so).
 
 INPUT FORMATS — you may receive any mix of:
@@ -322,8 +322,8 @@ Extract every main part using context cues (topmost in lists; leftmost in simple
  * ───────────────────────────────────────────────────────────────────────── */
 
 export const STAGE_2: StageConfig = {
-  provider: "openai",
-  model: "gpt-5.4-mini",
+  provider: "anthropic",
+  model: "claude-opus-5",
   prompt: `You extract main parts and their replacements from input text and return structured JSON. This is the PRELIMINARY list — a downstream verdict pass will reconcile it against the real database.
 
 CERTAINTY RULE — overriding all other rules: only emit a part / replacement when you are ABSOLUTELY SURE that the source text supports it. If you are not certain that an ID, name or compatibility relationship is present, OMIT it. Do NOT invent, guess, or fill gaps — a missing row is always better than a wrong row.
@@ -369,8 +369,8 @@ Output: {"Replacement parts":[{"Main part":{"id":["123A","124B"],"name":"Cylinde
  * ───────────────────────────────────────────────────────────────────────── */
 
 export const STAGE_3: StageConfig = {
-  provider: "openai",
-  model: "gpt-5.4-mini",
+  provider: "anthropic",
+  model: "claude-opus-5",
   prompt: `You are the VERDICT stage of a parts-import pipeline.
 
 CERTAINTY RULE — overriding all other rules: ONLY assign a \`documentId\` when you are ABSOLUTELY SURE the candidate is the correct DB row. If you have any doubt at all (suffix variants, fuzzy name overlap, ambiguous abbreviations), set \`documentId\` to "" and let a human decide. A blank verdict is ALWAYS preferable to a wrong verdict.
