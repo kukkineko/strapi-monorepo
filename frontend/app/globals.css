@@ -260,6 +260,36 @@ a:hover {
   gap: 0.42rem;
 }
 
+.wiki-topbar-search-section {
+  height: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--topbar-radius);
+  padding: 0 0.52rem;
+  background: #f0ede5;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: bold;
+  color: #2a3d6e;
+  cursor: pointer;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  appearance: none;
+  -webkit-appearance: none;
+  min-width: 56px;
+  max-width: 76px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+
+.wiki-topbar-search-section:hover,
+.wiki-topbar-search-section:focus {
+  border-color: #8393ff;
+  background: var(--cornflower-light);
+  outline: none;
+}
+
 .wiki-topbar-search-form input {
   height: 100%;
   width: 100%;
@@ -1610,6 +1640,14 @@ a:hover {
 
 .wiki-variants-heading {
   min-width: 0;
+}
+
+.wiki-variants-hint {
+  margin: 0.25rem 0 0;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: #6b7280;
+  max-width: 52ch;
 }
 
 .wiki-variants-stepper {

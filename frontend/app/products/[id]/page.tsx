@@ -1883,6 +1883,7 @@ export default function ProductPage() {
               <div className="wiki-variants-header">
                 <div className="wiki-variants-heading">
                   <h2>{t.page.variants}</h2>
+                  <p className="wiki-variants-hint">{t.page.variantsHint}</p>
                 </div>
                 <div className="wiki-variants-stepper" role="group" aria-label={t.page.variantsRange}>
                   <span className="wiki-variants-stepper-label">{t.page.variantsRange}</span>
