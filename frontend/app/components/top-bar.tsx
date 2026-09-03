@@ -5,7 +5,9 @@ import Image from "next/image";
 import { CSSProperties, FormEvent, MouseEvent, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { LanguageToggle } from "@/app/components/language-toggle";
+import { ThemeToggle } from "@/app/components/theme-toggle";
 import { useLanguage } from "@/app/components/language-provider";
+import { MimirLogo } from "@/app/components/mimir-logo";
 import { UserPanel } from "@/app/components/user-panel";
 import { searchEntries, type Entry } from "@/app/lib/entries";
 import { HoverPreview, useHoverPreview } from "@/app/components/hover-preview";
@@ -30,9 +32,7 @@ import {
   TOPBAR_ICON_HOME_SIZE,
   TOPBAR_ICON_LOGIN,
   TOPBAR_ICON_LOGIN_SIZE,
-  TOPBAR_LOGO_HEIGHT,
   TOPBAR_LOGO_SLOT_WIDTH,
-  TOPBAR_LOGO_WIDTH,
 } from "@/app/lib/topbar-icons";
 
 type TopBarAction = {
@@ -346,15 +346,7 @@ export function TopBar({ actions }: TopBarProps) {
 
         {/* Logo */}
         <div className="wiki-topbar-logo" aria-label="Logo area">
-          <Image
-            src="/logo.png"
-            alt="Logo"
-            className="wiki-topbar-logo-image"
-            width={TOPBAR_LOGO_WIDTH}
-            height={TOPBAR_LOGO_HEIGHT}
-            style={{ width: "auto", height: "auto", maxWidth: "100%", maxHeight: "100%" }}
-            priority
-          />
+          <MimirLogo size="sm" />
         </div>
 
         {/* Action icons */}
@@ -558,6 +550,7 @@ export function TopBar({ actions }: TopBarProps) {
             </button>
           )}
 
+          <ThemeToggle />
           <LanguageToggle />
         </div>
       </nav>

@@ -449,7 +449,7 @@ function FavouritesTab() {
                     {thumb ? (
                       <img src={thumb} alt="" width={48} height={48} loading="lazy" />
                     ) : (
-                      <span aria-hidden="true" style={{ fontSize: "1.1rem", color: "#94a3b8" }}>?</span>
+                      <span aria-hidden="true" style={{ fontSize: "1.1rem", color: "var(--muted)" }}>?</span>
                     )}
                   </span>
                   <span className="wiki-user-fav-text">
@@ -515,7 +515,14 @@ function ListsTab({ onClose }: { onClose: () => void }) {
         return (
           <section key={project.id} className="wiki-user-list-card">
             <div className="wiki-user-list-card-head">
-              <strong>{project.name}</strong>
+              <strong>
+                {project.name}
+                {project.shareCode && (
+                  <span className="wiki-list-chip-shared" title={t.lists.shareTitle} aria-label={t.lists.shareTitle}>
+                    🔗
+                  </span>
+                )}
+              </strong>
               <span className="wiki-muted">
                 {items.length} {items.length === 1 ? t.userPanel.listsArticle : t.userPanel.listsArticles}
                 {items.length > 0 && ` · ${totalAmount} ${t.userPanel.listsTotal}`}
@@ -819,10 +826,10 @@ export function UserPanel({
           display:        "flex",
           flexDirection:  "column",
           borderRadius:   "18px",
-          background:     "linear-gradient(145deg,#ffffff,#f8fbff)",
+          background:     "linear-gradient(145deg, var(--surface), var(--stage-bg))",
           boxShadow:      "0 20px 60px rgba(15,23,42,0.35)",
           overflow:       "hidden",
-          border:         "1px solid rgba(200,210,230,0.6)",
+          border:         "1px solid var(--line)",
         }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -851,15 +858,15 @@ export function UserPanel({
             </div>
             {/* Username / full name / email / company */}
             <div style={{ display: "grid", gap: "0.1rem", minWidth: 0 }}>
-              <strong style={{ fontSize: "0.96rem", fontWeight: 800, color: "#0f172a" }}>
+              <strong style={{ fontSize: "0.96rem", fontWeight: 800, color: "var(--foreground)" }}>
                 {username}
               </strong>
               {fullName && (
-                <span style={{ fontSize: "0.82rem", fontWeight: 600, color: "#475569" }}>{fullName}</span>
+                <span style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--muted)" }}>{fullName}</span>
               )}
-              <span style={{ fontSize: "0.78rem", color: "#64748b" }}>{user.email}</span>
+              <span style={{ fontSize: "0.78rem", color: "var(--muted)" }}>{user.email}</span>
               {company && (
-                <span style={{ fontSize: "0.72rem", color: "#94a3b8" }}>{company}</span>
+                <span style={{ fontSize: "0.72rem", color: "var(--muted)" }}>{company}</span>
               )}
             </div>
           </div>

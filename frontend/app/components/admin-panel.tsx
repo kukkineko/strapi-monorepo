@@ -397,7 +397,7 @@ function UserDetailDrawer({
                       >
                         {actionStyle.label}
                       </span>
-                      <span style={{ fontSize: "0.62rem", color: "#94a3b8", textTransform: "uppercase" }}>
+                      <span style={{ fontSize: "0.62rem", color: "var(--muted)", textTransform: "uppercase" }}>
                         {entry.section}
                       </span>
                     </div>
@@ -418,9 +418,9 @@ function UserDetailDrawer({
                               fontSize: "0.65rem",
                               padding: "0.08rem 0.4rem",
                               borderRadius: "4px",
-                              border: "1px solid #e2e8f0",
-                              background: undoStates.get(entry.timestamp) === "pending" ? "#f1f5f9" : "#fff",
-                              color: "#374151",
+                              border: "1px solid var(--line)",
+                              background: undoStates.get(entry.timestamp) === "pending" ? "var(--stage-bg)" : "var(--surface)",
+                              color: "var(--muted)",
                               cursor: undoStates.get(entry.timestamp) === "pending" ? "default" : "pointer",
                               fontWeight: 500,
                             }}
@@ -2595,9 +2595,10 @@ export function AuditLogContent() {
           style={{
             padding: "0.4rem 0.6rem",
             borderRadius: "8px",
-            border: "1px solid #cbd5e1",
+            border: "1px solid var(--line)",
             fontSize: "0.82rem",
-            background: "#fff",
+            background: "var(--surface)",
+            color: "var(--foreground)",
             cursor: "pointer",
           }}
         >
@@ -2656,22 +2657,22 @@ export function AuditLogContent() {
                   >
                     {actionStyle.label}
                   </span>
-                  <span style={{ fontSize: "0.65rem", color: "#94a3b8", textTransform: "uppercase" }}>
+                  <span style={{ fontSize: "0.65rem", color: "var(--muted)", textTransform: "uppercase" }}>
                     {log.section}
                   </span>
                 </div>
 
                 {/* Details */}
                 <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem", minWidth: 0 }}>
-                  <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "#0f172a" }}>
+                  <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--foreground)" }}>
                     {log.details}
                   </span>
-                  <span style={{ fontSize: "0.75rem", color: "#64748b" }}>
+                  <span style={{ fontSize: "0.75rem", color: "var(--muted)" }}>
                     by <strong>{log.userDisplayName}</strong>{" "}
-                    <span style={{ color: "#94a3b8" }}>({log.userEmail})</span>
+                    <span style={{ color: "var(--muted)" }}>({log.userEmail})</span>
                   </span>
                   <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
-                    <span style={{ fontSize: "0.7rem", color: "#94a3b8" }}>
+                    <span style={{ fontSize: "0.7rem", color: "var(--muted)" }}>
                       {dateStr} at {timeStr} · ID: {log.entryId}
                     </span>
                     {log.snapshot && undoStates.get(log.timestamp) !== "done" && (
@@ -2681,9 +2682,9 @@ export function AuditLogContent() {
                           fontSize: "0.7rem",
                           padding: "0.1rem 0.45rem",
                           borderRadius: "5px",
-                          border: "1px solid #e2e8f0",
-                          background: undoStates.get(log.timestamp) === "pending" ? "#f1f5f9" : "#fff",
-                          color: "#374151",
+                          border: "1px solid var(--line)",
+                          background: undoStates.get(log.timestamp) === "pending" ? "var(--stage-bg)" : "var(--surface)",
+                          color: "var(--muted)",
                           cursor: undoStates.get(log.timestamp) === "pending" ? "default" : "pointer",
                           fontWeight: 500,
                         }}
@@ -4953,7 +4954,7 @@ export function LinkConfidenceContent() {
           </div>
 
           {parsedLinks.length === 0 ? (
-            <p style={{ padding: "1rem", color: "#6b7280", fontSize: "0.85rem" }}>
+            <p style={{ padding: "1rem", color: "var(--muted)", fontSize: "0.85rem" }}>
               No relations found for this product.
             </p>
           ) : (
@@ -4996,7 +4997,7 @@ export function LinkConfidenceContent() {
                       )}
                     </div>
                     {le.desc && (
-                      <p style={{ margin: "0.25rem 0 0", fontSize: "0.8rem", color: "#374151" }}>
+                      <p style={{ margin: "0.25rem 0 0", fontSize: "0.8rem", color: "var(--muted)" }}>
                         {le.desc}
                       </p>
                     )}

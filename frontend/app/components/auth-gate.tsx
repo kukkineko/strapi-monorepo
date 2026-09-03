@@ -1,18 +1,15 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  TOPBAR_LOGO_HEIGHT,
-  TOPBAR_LOGO_WIDTH,
-} from "@/app/lib/topbar-icons";
 import type { AuthUser } from "@/app/lib/auth-types";
 import { useLanguage } from "@/app/components/language-provider";
 import type { Language } from "@/app/lib/i18n";
 import { Footer } from "@/app/components/footer";
 import { CookieBanner } from "@/app/components/cookie-banner";
+import { MimirLogo } from "@/app/components/mimir-logo";
+import { ThemeToggle } from "@/app/components/theme-toggle";
 
 type GateState = "loading" | "unauthenticated" | "unconfirmed" | "blocked" | "ok";
 
@@ -22,6 +19,8 @@ function GateLangSelector() {
   const { language, setLanguage, t } = useLanguage();
   return (
     <div className="wiki-gate-lang-selector">
+      <ThemeToggle />
+      <span className="wiki-gate-lang-sep" aria-hidden="true">|</span>
       <button
         type="button"
         className={`wiki-gate-lang-btn${language === "de" ? " active" : ""}`}
@@ -51,14 +50,7 @@ function LandingPage({ onLogin }: { onLogin: (user: AuthUser) => void }) {
 
   const logo = (
     <div className="wiki-gate-logo">
-      <Image
-        src="/logo.png"
-        alt="Logo"
-        width={TOPBAR_LOGO_WIDTH}
-        height={TOPBAR_LOGO_HEIGHT}
-        style={{ width: "auto", height: "auto", maxWidth: "200px", maxHeight: "64px" }}
-        priority
-      />
+      <MimirLogo />
     </div>
   );
 
@@ -350,14 +342,7 @@ function PendingPage({
     <div className="wiki-gate-landing">
       <div className="wiki-gate-card">
         <div className="wiki-gate-logo">
-          <Image
-            src="/logo.png"
-            alt="Logo"
-            width={TOPBAR_LOGO_WIDTH}
-            height={TOPBAR_LOGO_HEIGHT}
-            style={{ width: "auto", height: "auto", maxWidth: "200px", maxHeight: "64px" }}
-            priority
-          />
+          <MimirLogo />
         </div>
 
         <div className="wiki-gate-pending-icon" aria-hidden="true">⏳</div>
@@ -398,14 +383,7 @@ function BlockedPage({
     <div className="wiki-gate-landing">
       <div className="wiki-gate-card">
         <div className="wiki-gate-logo">
-          <Image
-            src="/logo.png"
-            alt="Logo"
-            width={TOPBAR_LOGO_WIDTH}
-            height={TOPBAR_LOGO_HEIGHT}
-            style={{ width: "auto", height: "auto", maxWidth: "200px", maxHeight: "64px" }}
-            priority
-          />
+          <MimirLogo />
         </div>
 
         <div className="wiki-gate-pending-icon" aria-hidden="true">🚫</div>
