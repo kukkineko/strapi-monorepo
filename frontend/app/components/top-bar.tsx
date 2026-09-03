@@ -51,16 +51,6 @@ type TopBarProps = { actions: TopBarAction[] };
 
 const SEARCH_HISTORY_KEY = "wiki-search-history";
 
-const SECTION_OPTIONS = [
-  { value: "all",          label: "All" },
-  ...Array.from({ length: 15 }, (_, i) => ({
-    value: `rubrik-r${String(i + 1).padStart(2, "0")}`,
-    label: `R${String(i + 1).padStart(2, "0")}`,
-  })),
-  { value: "replacements", label: "Repl." },
-  { value: "extra",        label: "Extra" },
-];
-
 /* ─── helpers ─────────────────────────────────────────────────────────────── */
 
 function isTrackableItemPath(pathname: string): boolean {
@@ -219,7 +209,6 @@ export function TopBar({ actions }: TopBarProps) {
 
   /* search */
   const [currentSearchParams,   setCurrentSearchParams]   = useState("");
-  const [searchSection,         setSearchSection]         = useState("all");
   const [searchValue,           setSearchValue]           = useState("");
   const [searchSuggestions,     setSearchSuggestions]     = useState<string[]>([]);
   const [searchPreview,         setSearchPreview]         = useState<Entry[]>([]);
@@ -262,14 +251,12 @@ export function TopBar({ actions }: TopBarProps) {
   /* ── sync search value from URL ── */
   useEffect(() => setSearchValue(urlQuery), [urlQuery]);
 
-  /* ── sync search params + section from URL on navigation ── */
+  /* ── sync search params from URL on navigation ── */
   useEffect(() => {
     if (typeof window === "undefined") return;
     const raw    = window.location.search;
     const params = raw.startsWith("?") ? raw.slice(1) : raw;
     setCurrentSearchParams(params);
-    const section = new URLSearchParams(params).get("section");
-    if (section) setSearchSection(section);
   }, [pathname]);
 
   /* ── load search history ── */
@@ -324,8 +311,7 @@ export function TopBar({ actions }: TopBarProps) {
   function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const params  = new URLSearchParams(currentSearchParams);
-    params.set("section", searchSection);
-    params.set("sort",    "artnr");
+    params.set("sort", "artnr");
     const trimmed = searchValue.trim();
     if (trimmed) {
       params.set("q", trimmed);
@@ -426,21 +412,6 @@ export function TopBar({ actions }: TopBarProps) {
             }}
           >
             <form className="wiki-topbar-search-form" onSubmit={onSubmit}>
-              {/* Category filter (left of search input) */}
-              <select
-                className="wiki-topbar-search-section"
-                value={searchSection}
-                onChange={(e) => setSearchSection(e.target.value)}
-                aria-label="Filter by category"
-                title="Filter by category"
-              >
-                {SECTION_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-
               <input
                 name="q"
                 type="search"
