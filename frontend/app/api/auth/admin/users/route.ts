@@ -56,14 +56,24 @@ export async function PUT(request: Request) {
     );
   }
 
-  const fields: { roles?: string[]; blocked?: boolean; confirmed?: boolean } = {};
+  const fields: {
+    roles?: string[];
+    blocked?: boolean;
+    confirmed?: boolean;
+    firstName?: string;
+    lastName?: string;
+    company?: string;
+  } = {};
   if (Array.isArray(rawFields.roles)) fields.roles = normalizeRoles(rawFields.roles);
   if (typeof rawFields.blocked === "boolean") fields.blocked = rawFields.blocked;
   if (typeof rawFields.confirmed === "boolean") fields.confirmed = rawFields.confirmed;
+  if (typeof rawFields.firstName === "string") fields.firstName = rawFields.firstName.trim();
+  if (typeof rawFields.lastName === "string") fields.lastName = rawFields.lastName.trim();
+  if (typeof rawFields.company === "string") fields.company = rawFields.company.trim();
 
   if (Object.keys(fields).length === 0) {
     return NextResponse.json(
-      { error: "No valid fields to update (roles, blocked, confirmed)." },
+      { error: "No valid fields to update (roles, blocked, confirmed, firstName, lastName, company)." },
       { status: 400 },
     );
   }

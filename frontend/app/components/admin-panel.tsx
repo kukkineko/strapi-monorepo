@@ -474,6 +474,111 @@ function UserDetailDrawer({
   return createPortal(content, document.body);
 }
 
+/* ─── UserEditDialog ─────────────────────────────────────────────────────── */
+/* Lets an administrator edit a user's name and company. */
+
+function UserEditDialog({
+  user,
+  onClose,
+  onSaved,
+}: {
+  user:    AuthUser;
+  onClose: () => void;
+  onSaved: (updated: AuthUser) => void;
+}) {
+  const [firstName, setFirstName] = useState(user.firstName ?? "");
+  const [lastName,  setLastName]  = useState(user.lastName ?? "");
+  const [company,   setCompany]   = useState(user.companyName ?? "");
+  const [saving,    setSaving]    = useState(false);
+  const [error,     setError]     = useState("");
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    setSaving(true);
+    try {
+      const res = await fetch("/api/auth/admin/users", {
+        method:  "PUT",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({
+          email:  user.email,
+          fields: { firstName: firstName.trim(), lastName: lastName.trim(), company: company.trim() },
+        }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!res.ok || !data.ok) {
+        setError(data.error ?? "Failed to save changes.");
+        return;
+      }
+      onSaved({
+        ...user,
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        companyName: company.trim(),
+        name: { name: firstName.trim(), surname: lastName.trim() },
+        company: company.trim() ? { name: company.trim() } : {},
+      });
+    } catch {
+      setError("Network error. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const content = (
+    <div className="wiki-user-detail-overlay" onClick={onClose}>
+      <div
+        className="wiki-user-detail-dialog"
+        style={{ maxWidth: "440px", maxHeight: "none" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="wiki-user-detail-header">
+          <div
+            className="wiki-admin-avatar"
+            style={{ background: getAvatarColor(user), flexShrink: 0 }}
+            aria-hidden="true"
+          >
+            {getUserInitials(user)}
+          </div>
+          <div className="wiki-user-detail-header-info">
+            <h2>Edit user</h2>
+            <p>{user.email}</p>
+          </div>
+          <button type="button" className="wiki-user-detail-close" onClick={onClose} aria-label="Close">×</button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="wiki-login-form" style={{ padding: "1.25rem" }}>
+          <div className="wiki-gate-name-row">
+            <label>
+              <span>First name</span>
+              <input type="text" value={firstName} onChange={(e) => setFirstName(e.target.value)} autoComplete="given-name" />
+            </label>
+            <label>
+              <span>Last name</span>
+              <input type="text" value={lastName} onChange={(e) => setLastName(e.target.value)} autoComplete="family-name" />
+            </label>
+          </div>
+          <label>
+            <span>Company</span>
+            <input type="text" value={company} onChange={(e) => setCompany(e.target.value)} autoComplete="organization" />
+          </label>
+          {error && <p className="wiki-error" style={{ margin: 0 }}>{error}</p>}
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <button type="submit" className="wiki-button primary" disabled={saving}>
+              {saving ? "Saving…" : "Save changes"}
+            </button>
+            <button type="button" className="wiki-button" onClick={onClose} disabled={saving}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+
+  return createPortal(content, document.body);
+}
+
 /* ─── AdminPanelContent ──────────────────────────────────────────────────── */
 /* Embeddable content block — no modal chrome or header.                      */
 /* Used directly in the UserPanel admin tab.                                  */
@@ -487,6 +592,7 @@ export function AdminPanelContent() {
   const [query,          setQuery]          = useState("");
   const [showPending,    setShowPending]    = useState(false);
   const [viewingUser,    setViewingUser]    = useState<AuthUser | null>(null);
+  const [editingUser,    setEditingUser]    = useState<AuthUser | null>(null);
   const [pendingChanges, setPendingChanges] = useState<Map<string, Partial<Record<BooleanUserFlag, boolean>>>>(new Map());
   const [savingAll,      setSavingAll]      = useState(false);
   const [savedAll,       setSavedAll]       = useState(false);
@@ -811,6 +917,14 @@ export function AdminPanelContent() {
                         <button
                           type="button"
                           className="wiki-admin-view-btn"
+                          onClick={() => setEditingUser(user)}
+                          title="Edit name / company"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          className="wiki-admin-view-btn"
                           onClick={() => setViewingUser(user)}
                           title="View audit log"
                         >
@@ -850,6 +964,18 @@ export function AdminPanelContent() {
               prev.map((u) => u.email === updated.email ? { ...u, auditLog: updated.auditLog } : u)
             );
             setViewingUser(updated);
+          }}
+        />
+      )}
+
+      {/* ── User Edit Dialog ── */}
+      {editingUser && (
+        <UserEditDialog
+          user={editingUser}
+          onClose={() => setEditingUser(null)}
+          onSaved={(updated) => {
+            setUsers((prev) => prev.map((u) => u.email === updated.email ? updated : u));
+            setEditingUser(null);
           }}
         />
       )}

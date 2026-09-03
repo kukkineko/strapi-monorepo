@@ -184,9 +184,6 @@ module.exports = {
     if (typeof body.firstName === 'string') data.firstName = body.firstName.trim();
     if (typeof body.lastName === 'string') data.lastName = body.lastName.trim();
     if (typeof body.company === 'string') data.company = body.company.trim();
-    if (typeof body.password === 'string' && body.password.length >= 6) {
-      data.password = body.password; // hashed by lifecycle
-    }
 
     if (Object.keys(data).length === 0) {
       return ctx.badRequest('No updatable fields supplied.');
@@ -197,6 +194,64 @@ module.exports = {
       data,
     });
     ctx.body = { user: sanitizeUser(updated) };
+  },
+
+  /**
+   * PUT /api/app-auth/password — bearer; self-service password change.
+   * Requires the caller's current password so a hijacked session (or an XSS
+   * that can only ride the bearer token) can't silently lock the real owner
+   * out — unlike updateMe, which never saw a password field to begin with.
+   */
+  async changePassword(ctx) {
+    const user = await currentUser(ctx);
+    if (!user) return ctx.unauthorized('Not authenticated.');
+
+    const body = ctx.request.body || {};
+    const currentPassword = typeof body.currentPassword === 'string' ? body.currentPassword : '';
+    const newPassword = typeof body.newPassword === 'string' ? body.newPassword : '';
+
+    if (!currentPassword || !newPassword) {
+      return ctx.badRequest('currentPassword and newPassword are required.');
+    }
+    if (newPassword.length < 6) {
+      return ctx.badRequest('New password must be at least 6 characters.');
+    }
+
+    const ok = await bcrypt.compare(currentPassword, user.password || '');
+    if (!ok) {
+      return ctx.unauthorized('Current password is incorrect.');
+    }
+
+    await strapi.documents(UID).update({
+      documentId: user.documentId,
+      data: { password: newPassword }, // hashed by the lifecycle
+    });
+    ctx.body = { ok: true };
+  },
+
+  /**
+   * POST /api/app-auth/delete-me — bearer; self-service account deletion.
+   * Requires the caller's password. Deletes the appuser record outright —
+   * favorites/lists/auditLog live as JSON on this same record, so removing
+   * it removes all of the user's personal data in one step.
+   */
+  async deleteMe(ctx) {
+    const user = await currentUser(ctx);
+    if (!user) return ctx.unauthorized('Not authenticated.');
+
+    const body = ctx.request.body || {};
+    const password = typeof body.password === 'string' ? body.password : '';
+    if (!password) {
+      return ctx.badRequest('password is required to confirm account deletion.');
+    }
+
+    const ok = await bcrypt.compare(password, user.password || '');
+    if (!ok) {
+      return ctx.unauthorized('Incorrect password.');
+    }
+
+    await strapi.documents(UID).delete({ documentId: user.documentId });
+    ctx.body = { ok: true };
   },
 
   /** GET /api/app-auth/users — bearer + administrator */
@@ -212,7 +267,7 @@ module.exports = {
     ctx.body = { users: users.map(sanitizeUser) };
   },
 
-  /** PUT /api/app-auth/users — bearer + administrator; set roles / status */
+  /** PUT /api/app-auth/users — bearer + administrator; set roles / status / profile */
   async updateUser(ctx) {
     const caller = await currentUser(ctx);
     if (!caller) return ctx.unauthorized('Not authenticated.');
@@ -235,9 +290,12 @@ module.exports = {
     if (Array.isArray(fields.roles)) data.roles = normalizeRoles(fields.roles);
     if (typeof fields.blocked === 'boolean') data.blocked = fields.blocked;
     if (typeof fields.confirmed === 'boolean') data.confirmed = fields.confirmed;
+    if (typeof fields.firstName === 'string') data.firstName = fields.firstName.trim();
+    if (typeof fields.lastName === 'string') data.lastName = fields.lastName.trim();
+    if (typeof fields.company === 'string') data.company = fields.company.trim();
 
     if (Object.keys(data).length === 0) {
-      return ctx.badRequest('No valid fields to update (roles, blocked, confirmed).');
+      return ctx.badRequest('No valid fields to update (roles, blocked, confirmed, firstName, lastName, company).');
     }
 
     const updated = await strapi.documents(UID).update({

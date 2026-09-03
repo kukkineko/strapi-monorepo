@@ -2,7 +2,7 @@
 
 import { createPortal } from "react-dom";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   displayName as formatDisplayName,
   displayUsername,
@@ -11,6 +11,7 @@ import {
 } from "@/app/lib/auth-types";
 import { getEntryById, type Entry } from "@/app/lib/entries";
 import { useProjects } from "@/app/lib/lists";
+import { useLanguage } from "@/app/components/language-provider";
 import {
   AdminPanelContent,
   AuditLogContent,
@@ -56,6 +57,181 @@ function getUserInitials(user: AuthUser): string {
 
 type Tab = "profile" | "favourites" | "lists" | "admin";
 
+/* ─── ChangePasswordForm ─────────────────────────────────────────────────── */
+
+function ChangePasswordForm({ onDone }: { onDone: () => void }) {
+  const { t } = useLanguage();
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword,     setNewPassword]     = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [error,           setError]           = useState("");
+  const [loading,         setLoading]         = useState(false);
+  const [success,         setSuccess]         = useState(false);
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError("");
+    if (newPassword.length < 6) { setError(t.userPanel.cpTooShort); return; }
+    if (newPassword !== confirmPassword) { setError(t.userPanel.cpMismatch); return; }
+    setLoading(true);
+    try {
+      const res = await fetch("/api/auth/password", {
+        method:  "PUT",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ currentPassword, newPassword }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!res.ok || !data.ok) {
+        setError(data.error ?? t.userPanel.cpFailed);
+      } else {
+        setSuccess(true);
+      }
+    } catch {
+      setError(t.gate.errorNetwork);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (success) {
+    return (
+      <div className="wiki-user-profile-subpanel">
+        <p className="wiki-user-profile-success">{t.userPanel.cpSuccess}</p>
+        <button type="button" className="wiki-button" onClick={onDone}>{t.userPanel.cpBack}</button>
+      </div>
+    );
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="wiki-login-form wiki-user-profile-subpanel">
+      <label>
+        <span>{t.userPanel.cpCurrentPassword}</span>
+        <input
+          type="password"
+          value={currentPassword}
+          onChange={(e) => setCurrentPassword(e.target.value)}
+          autoComplete="current-password"
+          required
+        />
+      </label>
+      <label>
+        <span>{t.userPanel.cpNewPassword}</span>
+        <input
+          type="password"
+          value={newPassword}
+          onChange={(e) => setNewPassword(e.target.value)}
+          autoComplete="new-password"
+          required
+        />
+      </label>
+      <label>
+        <span>{t.userPanel.cpConfirmNewPassword}</span>
+        <input
+          type="password"
+          value={confirmPassword}
+          onChange={(e) => setConfirmPassword(e.target.value)}
+          autoComplete="new-password"
+          required
+        />
+      </label>
+      {error && <p className="wiki-error" style={{ margin: 0 }}>{error}</p>}
+      <div style={{ display: "flex", gap: "0.5rem" }}>
+        <button type="submit" className="wiki-button primary" disabled={loading}>
+          {loading ? t.userPanel.cpSaving : t.userPanel.cpSave}
+        </button>
+        <button type="button" className="wiki-button" onClick={onDone} disabled={loading}>
+          {t.userPanel.cpCancel}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+/* ─── DeleteAccountForm ──────────────────────────────────────────────────── */
+
+function DeleteAccountForm({
+  onDone,
+  onDeleted,
+}: {
+  onDone:    () => void;
+  onDeleted: () => void;
+}) {
+  const { t } = useLanguage();
+  const [password, setPassword] = useState("");
+  const [confirmText, setConfirmText] = useState("");
+  const [error,    setError]    = useState("");
+  const [loading,  setLoading]  = useState(false);
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError("");
+    if (confirmText.trim().toUpperCase() !== t.userPanel.daConfirmWord) {
+      setError(t.userPanel.daConfirmError);
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch("/api/auth/delete-account", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ password }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!res.ok || !data.ok) {
+        setError(data.error ?? t.userPanel.daFailed);
+        setLoading(false);
+        return;
+      }
+      onDeleted();
+    } catch {
+      setError(t.gate.errorNetwork);
+      setLoading(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="wiki-login-form wiki-user-profile-subpanel">
+      <p className="wiki-error" style={{ margin: 0 }}>
+        {t.userPanel.daWarning}
+      </p>
+      <label>
+        <span>{t.userPanel.daPassword}</span>
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          autoComplete="current-password"
+          required
+        />
+      </label>
+      <label>
+        <span>{t.userPanel.daConfirmLabel}</span>
+        <input
+          type="text"
+          value={confirmText}
+          onChange={(e) => setConfirmText(e.target.value)}
+          autoComplete="off"
+          required
+        />
+      </label>
+      {error && <p className="wiki-error" style={{ margin: 0 }}>{error}</p>}
+      <div style={{ display: "flex", gap: "0.5rem" }}>
+        <button
+          type="submit"
+          className="wiki-button"
+          style={{ background: "#dc2626", color: "#fff", borderColor: "#dc2626" }}
+          disabled={loading}
+        >
+          {loading ? t.userPanel.daDeleting : t.userPanel.daSubmit}
+        </button>
+        <button type="button" className="wiki-button" onClick={onDone} disabled={loading}>
+          {t.userPanel.daCancel}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 /* ─── ProfileTab ─────────────────────────────────────────────────────────── */
 
 function ProfileTab({
@@ -65,29 +241,48 @@ function ProfileTab({
   user:     AuthUser;
   onLogout: () => void;
 }) {
+  const { t } = useLanguage();
+  const [view, setView] = useState<"main" | "password" | "delete">("main");
+
   const displayedName =
     formatDisplayName(user.name) ||
     displayUsername(user.username) ||
     user.email.split("@")[0];
+  const username = displayUsername(user.username);
   const company = displayCompany(user.company);
+
+  if (view === "password") {
+    return <ChangePasswordForm onDone={() => setView("main")} />;
+  }
+
+  if (view === "delete") {
+    return <DeleteAccountForm onDone={() => setView("main")} onDeleted={onLogout} />;
+  }
 
   return (
     <div>
       {/* ── Info fields ── */}
       <div className="wiki-user-profile-fields">
         <div className="wiki-user-profile-field">
-          <span className="wiki-user-profile-label">Name</span>
+          <span className="wiki-user-profile-label">{t.userPanel.fieldName}</span>
           <span className="wiki-user-profile-value">{displayedName}</span>
         </div>
 
+        {username && (
+          <div className="wiki-user-profile-field">
+            <span className="wiki-user-profile-label">{t.userPanel.fieldUsername}</span>
+            <span className="wiki-user-profile-value">{username}</span>
+          </div>
+        )}
+
         <div className="wiki-user-profile-field">
-          <span className="wiki-user-profile-label">Email</span>
+          <span className="wiki-user-profile-label">{t.userPanel.fieldEmail}</span>
           <span className="wiki-user-profile-value">{user.email}</span>
         </div>
 
         {company && (
           <div className="wiki-user-profile-field">
-            <span className="wiki-user-profile-label">Company</span>
+            <span className="wiki-user-profile-label">{t.userPanel.fieldCompany}</span>
             <span className="wiki-user-profile-value">{company}</span>
           </div>
         )}
@@ -96,27 +291,43 @@ function ProfileTab({
       {/* ── Role badges ── */}
       <div className="wiki-user-profile-roles">
         {user.administrator && (
-          <span className="wiki-user-role-badge admin">Administrator</span>
+          <span className="wiki-user-role-badge admin">{t.userPanel.roleAdmin}</span>
         )}
         {user.employee && (
-          <span className="wiki-user-role-badge employee">Employee</span>
+          <span className="wiki-user-role-badge employee">{t.userPanel.roleEmployee}</span>
         )}
         {user.trusted && (
-          <span className="wiki-user-role-badge trusted">Trusted</span>
+          <span className="wiki-user-role-badge trusted">{t.userPanel.roleTrusted}</span>
         )}
         {user.confirmed && (
-          <span className="wiki-user-role-badge confirmed">Confirmed</span>
+          <span className="wiki-user-role-badge confirmed">{t.userPanel.roleConfirmed}</span>
         )}
       </div>
 
-      {/* ── Sign out ── */}
-      <button
-        type="button"
-        className="wiki-user-signout-btn"
-        onClick={onLogout}
-      >
-        Sign out
-      </button>
+      {/* ── Sign out (left) + account actions (right), same row ── */}
+      <div className="wiki-user-profile-actions-row">
+        <button
+          type="button"
+          className="wiki-user-signout-btn"
+          onClick={onLogout}
+        >
+          {t.gate.signOut}
+        </button>
+
+        <div className="wiki-user-profile-actions">
+          <button type="button" className="wiki-button" onClick={() => setView("password")}>
+            {t.userPanel.changePassword}
+          </button>
+          <button
+            type="button"
+            className="wiki-button"
+            style={{ color: "#dc2626", borderColor: "#fecdd3" }}
+            onClick={() => setView("delete")}
+          >
+            {t.userPanel.deleteAccount}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -124,6 +335,7 @@ function ProfileTab({
 /* ─── FavouritesTab ──────────────────────────────────────────────────────── */
 
 function FavouritesTab() {
+  const { t } = useLanguage();
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState("");
@@ -133,7 +345,7 @@ function FavouritesTab() {
     async function load() {
       try {
         const res = await fetch("/api/auth/favorites");
-        if (!res.ok) { setError("Failed to load favourites."); return; }
+        if (!res.ok) { setError(t.userPanel.favLoadFailed); return; }
         const data = (await res.json()) as { favorites: string[] };
         const ids  = data.favorites ?? [];
         if (ids.length === 0) { setEntries([]); return; }
@@ -142,12 +354,13 @@ function FavouritesTab() {
         );
         setEntries(loaded.filter((e): e is Entry => e !== null));
       } catch {
-        setError("Network error loading favourites.");
+        setError(t.userPanel.favNetworkError);
       } finally {
         setLoading(false);
       }
     }
     void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const filteredEntries = useMemo(() => {
@@ -175,7 +388,7 @@ function FavouritesTab() {
     return (
       <div className="wiki-user-panel-loading">
         <span className="wiki-admin-spinner" aria-hidden="true" />
-        Loading favourites…
+        {t.userPanel.favLoading}
       </div>
     );
   }
@@ -197,8 +410,8 @@ function FavouritesTab() {
               className="wiki-admin-search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search favourites by name or ArtNr…"
-              aria-label="Search favourites"
+              placeholder={t.userPanel.favSearchPlaceholder}
+              aria-label={t.userPanel.favSearchLabel}
             />
           </div>
           {query.trim() && (
@@ -212,13 +425,13 @@ function FavouritesTab() {
       {/* ── Empty state ── */}
       {entries.length === 0 && (
         <p className="wiki-user-panel-empty">
-          No favourites yet. Star items on product pages to save them here.
+          {t.userPanel.favEmpty}
         </p>
       )}
 
       {/* ── No search results ── */}
       {entries.length > 0 && filteredEntries.length === 0 && (
-        <p className="wiki-user-panel-empty">No favourites match your search.</p>
+        <p className="wiki-user-panel-empty">{t.userPanel.favNoMatch}</p>
       )}
 
       {/* ── Favourites list ── */}
@@ -241,14 +454,14 @@ function FavouritesTab() {
                   </span>
                   <span className="wiki-user-fav-text">
                     <strong>{entry.title}</strong>
-                    {entry.artNr && <span>ArtNr: {entry.artNr}</span>}
+                    {entry.artNr && <span>{t.userPanel.favArtNrPrefix}: {entry.artNr}</span>}
                   </span>
                 </Link>
                 <button
                   type="button"
                   className="wiki-user-fav-remove"
-                  title="Remove from favourites"
-                  aria-label={`Remove ${entry.title} from favourites`}
+                  title={t.userPanel.favRemoveTitle}
+                  aria-label={`${t.userPanel.favRemoveAria} ${entry.title}`}
                   onClick={() => void unfavourite(entry.documentId)}
                 >
                   ★
@@ -269,16 +482,17 @@ function FavouritesTab() {
 /* positions, amounts, add/remove — lives on the /listen page.                */
 
 function ListsTab({ onClose }: { onClose: () => void }) {
+  const { t } = useLanguage();
   const projects = useProjects();
 
   if (projects.length === 0) {
     return (
       <div className="wiki-user-lists-empty">
         <p className="wiki-user-panel-empty">
-          No lists yet. Create a project and add articles to it.
+          {t.userPanel.listsEmpty}
         </p>
         <Link href="/listen" className="wiki-button primary" onClick={onClose}>
-          Open Lists
+          {t.userPanel.listsOpen}
         </Link>
       </div>
     );
@@ -288,10 +502,10 @@ function ListsTab({ onClose }: { onClose: () => void }) {
     <div className="wiki-user-lists">
       <div className="wiki-user-lists-head">
         <span className="wiki-muted">
-          {projects.length} {projects.length === 1 ? "project" : "projects"}
+          {projects.length} {projects.length === 1 ? t.userPanel.listsProject : t.userPanel.listsProjects}
         </span>
         <Link href="/listen" className="wiki-button small" onClick={onClose}>
-          Open full editor
+          {t.userPanel.listsOpenEditor}
         </Link>
       </div>
 
@@ -303,21 +517,21 @@ function ListsTab({ onClose }: { onClose: () => void }) {
             <div className="wiki-user-list-card-head">
               <strong>{project.name}</strong>
               <span className="wiki-muted">
-                {items.length} {items.length === 1 ? "article" : "articles"}
-                {items.length > 0 && ` · ${totalAmount} total`}
+                {items.length} {items.length === 1 ? t.userPanel.listsArticle : t.userPanel.listsArticles}
+                {items.length > 0 && ` · ${totalAmount} ${t.userPanel.listsTotal}`}
               </span>
             </div>
 
             {items.length === 0 ? (
-              <p className="wiki-muted wiki-user-list-empty-row">No articles yet.</p>
+              <p className="wiki-muted wiki-user-list-empty-row">{t.userPanel.listsNoArticles}</p>
             ) : (
               <div className="wiki-list-table-scroll">
                 <table className="wiki-list-table">
                   <thead>
                     <tr>
-                      <th className="wiki-list-cell-pos">Pos.</th>
-                      <th className="wiki-list-cell-article">Article</th>
-                      <th className="wiki-list-cell-amount">Amount</th>
+                      <th className="wiki-list-cell-pos">{t.lists.colPosition}</th>
+                      <th className="wiki-list-cell-article">{t.lists.colArticle}</th>
+                      <th className="wiki-list-cell-amount">{t.lists.colAmount}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -353,96 +567,97 @@ function ListsTab({ onClose }: { onClose: () => void }) {
 type AdminView = null | "users" | "db" | "stats" | "audit" | "import" | "confidence" | "assigndocs" | "server";
 
 const ADMIN_SECTIONS: Array<{
-  id:     "users" | "db" | "stats" | "audit" | "import" | "confidence" | "assigndocs" | "server";
-  icon:   string;
-  title:  string;
-  desc:   string;
-  color:  string;
-  bg:     string;
-  border: string;
+  id:        "users" | "db" | "stats" | "audit" | "import" | "confidence" | "assigndocs" | "server";
+  icon:      string;
+  titleKey:  "adminUsersTitle" | "adminAuditTitle" | "adminDbTitle" | "adminStatsTitle" | "adminImportTitle" | "adminConfidenceTitle" | "adminAssignDocsTitle" | "adminServerTitle";
+  descKey:   "adminUsersDesc" | "adminAuditDesc" | "adminDbDesc" | "adminStatsDesc" | "adminImportDesc" | "adminConfidenceDesc" | "adminAssignDocsDesc" | "adminServerDesc";
+  color:     string;
+  bg:        string;
+  border:    string;
 }> = [
   {
-    id:     "users",
-    icon:   "👥",
-    title:  "Users",
-    desc:   "Manage user accounts, roles and permissions",
-    color:  "#1e40af",
-    bg:     "#eff6ff",
-    border: "#bfdbfe",
+    id:       "users",
+    icon:     "👥",
+    titleKey: "adminUsersTitle",
+    descKey:  "adminUsersDesc",
+    color:    "#1e40af",
+    bg:       "#eff6ff",
+    border:   "#bfdbfe",
   },
   {
-    id:     "audit",
-    icon:   "📋",
-    title:  "Audit Log",
-    desc:   "View a log of all content changes by all users",
-    color:  "#b45309",
-    bg:     "#fffbeb",
-    border: "#fde68a",
+    id:       "audit",
+    icon:     "📋",
+    titleKey: "adminAuditTitle",
+    descKey:  "adminAuditDesc",
+    color:    "#b45309",
+    bg:       "#fffbeb",
+    border:   "#fde68a",
   },
   {
-    id:     "db",
-    icon:   "💾",
-    title:  "DB Backup",
-    desc:   "Export or import a full database backup",
-    color:  "#7c3aed",
-    bg:     "#f5f3ff",
-    border: "#ddd6fe",
+    id:       "db",
+    icon:     "💾",
+    titleKey: "adminDbTitle",
+    descKey:  "adminDbDesc",
+    color:    "#7c3aed",
+    bg:       "#f5f3ff",
+    border:   "#ddd6fe",
   },
   {
-    id:     "stats",
-    icon:   "📊",
-    title:  "DB Statistics",
-    desc:   "Entry counts, categories and cross-link graph",
-    color:  "#0891b2",
-    bg:     "#ecfeff",
-    border: "#a5f3fc",
+    id:       "stats",
+    icon:     "📊",
+    titleKey: "adminStatsTitle",
+    descKey:  "adminStatsDesc",
+    color:    "#0891b2",
+    bg:       "#ecfeff",
+    border:   "#a5f3fc",
   },
   {
-    id:     "import",
-    icon:   "📥",
-    title:  "Import Data",
-    desc:   "Upload documents to AI and link replacement parts",
-    color:  "#059669",
-    bg:     "#ecfdf5",
-    border: "#a7f3d0",
+    id:       "import",
+    icon:     "📥",
+    titleKey: "adminImportTitle",
+    descKey:  "adminImportDesc",
+    color:    "#059669",
+    bg:       "#ecfdf5",
+    border:   "#a7f3d0",
   },
   {
-    id:     "confidence",
-    icon:   "🔗",
-    title:  "Link Confidence",
-    desc:   "Edit confidence scores and metadata for product relations",
-    color:  "#7c3aed",
-    bg:     "#faf5ff",
-    border: "#e9d5ff",
+    id:       "confidence",
+    icon:     "🔗",
+    titleKey: "adminConfidenceTitle",
+    descKey:  "adminConfidenceDesc",
+    color:    "#7c3aed",
+    bg:       "#faf5ff",
+    border:   "#e9d5ff",
   },
   {
-    id:     "assigndocs",
-    icon:   "📂",
-    title:  "Assign Documents",
-    desc:   "Scan a folder and auto-assign PDFs to articles by article number",
-    color:  "#0369a1",
-    bg:     "#f0f9ff",
-    border: "#bae6fd",
+    id:       "assigndocs",
+    icon:     "📂",
+    titleKey: "adminAssignDocsTitle",
+    descKey:  "adminAssignDocsDesc",
+    color:    "#0369a1",
+    bg:       "#f0f9ff",
+    border:   "#bae6fd",
   },
   {
-    id:     "server",
-    icon:   "🔄",
-    title:  "Server",
-    desc:   "Build and restart the production server",
-    color:  "#b91c1c",
-    bg:     "#fff1f2",
-    border: "#fecdd3",
+    id:       "server",
+    icon:     "🔄",
+    titleKey: "adminServerTitle",
+    descKey:  "adminServerDesc",
+    color:    "#b91c1c",
+    bg:       "#fff1f2",
+    border:   "#fecdd3",
   },
 ];
 
 function AdminTab({ onClose }: { onClose: () => void }) {
+  const { t } = useLanguage();
   const [view, setView] = useState<AdminView>(null);
 
   /* ── Hub (section picker) ── */
   if (view === null) {
     return (
       <div className="wiki-admin-hub">
-        <p className="wiki-admin-hub-hint">Select a section</p>
+        <p className="wiki-admin-hub-hint">{t.userPanel.adminHint}</p>
         <div className="wiki-admin-hub-grid">
           {ADMIN_SECTIONS.map((s) => (
             <button
@@ -461,8 +676,8 @@ function AdminTab({ onClose }: { onClose: () => void }) {
               onClick={() => setView(s.id)}
             >
               <span className="wiki-admin-hub-card-icon" aria-hidden="true">{s.icon}</span>
-              <span className="wiki-admin-hub-card-title" style={{ color: s.color }}>{s.title}</span>
-              <span className="wiki-admin-hub-card-desc">{s.desc}</span>
+              <span className="wiki-admin-hub-card-title" style={{ color: s.color }}>{t.userPanel[s.titleKey]}</span>
+              <span className="wiki-admin-hub-card-desc">{t.userPanel[s.descKey]}</span>
               <span className="wiki-admin-hub-card-arrow" style={{ color: s.color }} aria-hidden="true">→</span>
             </button>
           ))}
@@ -482,12 +697,12 @@ function AdminTab({ onClose }: { onClose: () => void }) {
           type="button"
           className="wiki-admin-subpage-back"
           onClick={() => setView(null)}
-          aria-label="Back to admin overview"
+          aria-label={t.userPanel.adminBack}
         >
           ←
         </button>
         <span className="wiki-admin-subpage-icon" aria-hidden="true">{section.icon}</span>
-        <h2 className="wiki-admin-subpage-title">{section.title}</h2>
+        <h2 className="wiki-admin-subpage-title">{t.userPanel[section.titleKey]}</h2>
       </div>
 
       {view === "users"      && <AdminPanelContent />}
@@ -517,6 +732,7 @@ export function UserPanel({
   onClose:  () => void;
   onLogout: () => void;
 }) {
+  const { t } = useLanguage();
   const [tab,     setTab]     = useState<Tab>("profile");
   const [mounted, setMounted] = useState(false);
 
@@ -651,7 +867,7 @@ export function UserPanel({
             type="button"
             className="wiki-modal-close"
             onClick={onClose}
-            aria-label="Close"
+            aria-label={t.userPanel.close}
           >
             ×
           </button>
@@ -665,7 +881,7 @@ export function UserPanel({
             className={`wiki-user-panel-tab-btn${tab === "profile" ? " active" : ""}`}
             onClick={() => setTab("profile")}
           >
-            Profile
+            {t.userPanel.tabProfile}
           </button>
           <button
             type="button" role="tab"
@@ -673,7 +889,7 @@ export function UserPanel({
             className={`wiki-user-panel-tab-btn${tab === "favourites" ? " active" : ""}`}
             onClick={() => setTab("favourites")}
           >
-            Favourites
+            {t.userPanel.tabFavourites}
           </button>
           <button
             type="button" role="tab"
@@ -681,7 +897,7 @@ export function UserPanel({
             className={`wiki-user-panel-tab-btn${tab === "lists" ? " active" : ""}`}
             onClick={() => setTab("lists")}
           >
-            Lists
+            {t.userPanel.tabLists}
           </button>
           {user.administrator && (
             <button
@@ -690,7 +906,7 @@ export function UserPanel({
               className={`wiki-user-panel-tab-btn admin${tab === "admin" ? " active" : ""}`}
               onClick={() => setTab("admin")}
             >
-              ⚙ Admin
+              ⚙ {t.userPanel.tabAdmin}
             </button>
           )}
         </div>

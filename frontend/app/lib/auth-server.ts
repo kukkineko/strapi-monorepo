@@ -172,6 +172,52 @@ export async function updateMe(jwt: string, fields: Record<string, unknown>): Pr
   return mapApiUserToAuthUser(payload?.user);
 }
 
+type SimpleResult = { ok: true } | { ok: false; error: string };
+
+async function extractError(response: Response): Promise<string> {
+  const payload = (await response.json().catch(() => null)) as
+    | { error?: { message?: string } | string }
+    | null;
+  return (
+    (payload && typeof payload.error === "object" && payload.error?.message) ||
+    (payload && typeof payload.error === "string" && payload.error) ||
+    "Request failed."
+  );
+}
+
+/** Change the caller's password, verifying `currentPassword` server-side. */
+export async function changeMyPassword(
+  jwt: string,
+  currentPassword: string,
+  newPassword: string,
+): Promise<SimpleResult> {
+  const response = await fetch(`${AUTH_BASE}/password`, {
+    method: "PUT",
+    headers: bearer(jwt),
+    body: JSON.stringify({ currentPassword, newPassword }),
+    cache: "no-store",
+  });
+  if (response.ok) return { ok: true };
+  return { ok: false, error: await extractError(response) };
+}
+
+/**
+ * Permanently delete the caller's account, verifying `password` server-side.
+ * Uses POST rather than DELETE — Strapi's default body parser only parses
+ * request bodies for POST/PUT/PATCH, so a DELETE here would silently arrive
+ * with an empty body and always fail the password check.
+ */
+export async function deleteMyAccount(jwt: string, password: string): Promise<SimpleResult> {
+  const response = await fetch(`${AUTH_BASE}/delete-me`, {
+    method: "POST",
+    headers: bearer(jwt),
+    body: JSON.stringify({ password }),
+    cache: "no-store",
+  });
+  if (response.ok) return { ok: true };
+  return { ok: false, error: await extractError(response) };
+}
+
 /* ─── admin (administrator role required, enforced server-side) ──────────── */
 
 export async function adminListUsers(jwt: string): Promise<AuthUser[]> {
@@ -190,7 +236,15 @@ export async function adminListUsers(jwt: string): Promise<AuthUser[]> {
 export async function adminUpdateUser(
   jwt: string,
   target: { documentId?: string; email?: string },
-  fields: { roles?: string[]; blocked?: boolean; confirmed?: boolean; auditLog?: AuditLogEntry[] },
+  fields: {
+    roles?: string[];
+    blocked?: boolean;
+    confirmed?: boolean;
+    auditLog?: AuditLogEntry[];
+    firstName?: string;
+    lastName?: string;
+    company?: string;
+  },
 ): Promise<boolean> {
   const response = await fetch(`${AUTH_BASE}/users`, {
     method: "PUT",
