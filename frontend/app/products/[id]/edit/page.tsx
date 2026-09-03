@@ -9,6 +9,7 @@ import type { Entry, EntryPayload } from "@/app/lib/entries";
 import {
   appendItemImages,
   getItemImages,
+  moveItemImage,
   removeItemImage,
 } from "@/app/lib/item-images";
 import type { AuthUser } from "@/app/lib/auth-types";
@@ -625,6 +626,20 @@ export default function EditProductPage() {
     }
   }
 
+  async function onMoveImage(index: number, direction: -1 | 1) {
+    if (!entryId) {
+      return;
+    }
+
+    try {
+      await moveItemImage(entryId, index, index + direction);
+      setImagesVersion((current) => current + 1);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t.form.failedToUploadImages;
+      setError(message);
+    }
+  }
+
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -783,13 +798,35 @@ export default function EditProductPage() {
                         className="wiki-upload-thumb"
                         onError={(e) => { (e.currentTarget as HTMLImageElement).style.opacity = "0.3"; }}
                       />
-                      <button
-                        type="button"
-                        className="wiki-button-small"
-                        onClick={() => void onRemoveImage(index)}
-                      >
-                        Remove
-                      </button>
+                      <div className="wiki-card-actions">
+                        <button
+                          type="button"
+                          className="wiki-button-small"
+                          onClick={() => void onMoveImage(index, -1)}
+                          disabled={index === 0}
+                          aria-label="Move image earlier"
+                          title="Move earlier"
+                        >
+                          ←
+                        </button>
+                        <button
+                          type="button"
+                          className="wiki-button-small"
+                          onClick={() => void onMoveImage(index, 1)}
+                          disabled={index === itemImages.length - 1}
+                          aria-label="Move image later"
+                          title="Move later"
+                        >
+                          →
+                        </button>
+                        <button
+                          type="button"
+                          className="wiki-button-small"
+                          onClick={() => void onRemoveImage(index)}
+                        >
+                          Remove
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>

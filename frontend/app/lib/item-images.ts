@@ -1,4 +1,4 @@
-import { uploadMedia, getEntryById, type StrapiMedia, type Entry } from "./entries";
+import { uploadMedia, getEntryById, cacheEntry, type StrapiMedia, type Entry } from "./entries";
 
 const ITEM_IMAGE_PREFIX = "wiki-item-images:";
 
@@ -78,6 +78,7 @@ export async function appendItemImages(itemId: string, files: File[]): Promise<s
 
     const updated = (await res.json()) as Entry;
     const urls = updated.pictureUrls ?? [];
+    cacheEntry(updated);
 
     if (typeof window !== "undefined") {
       window.localStorage.setItem(getStorageKey(itemId), JSON.stringify(urls));
@@ -139,6 +140,7 @@ export async function removeItemImage(itemId: string, index: number): Promise<st
 
       const updated = (await res.json()) as Entry;
       const urls = updated.pictureUrls ?? [];
+      cacheEntry(updated);
       window.localStorage.setItem(getStorageKey(itemId), JSON.stringify(urls));
       return urls;
     }
@@ -146,6 +148,60 @@ export async function removeItemImage(itemId: string, index: number): Promise<st
     return entry?.pictureUrls ?? [];
   } catch (error) {
     console.error("[removeItemImage] Error removing image:", error);
+    throw error;
+  }
+}
+
+/**
+ * Move an image to a different position in the display order and persist
+ * the change to Strapi. `toIndex` is clamped to the valid range.
+ * Uses the authenticated API route so that only trusted users can
+ * modify entries and the action is audit-logged.
+ */
+export async function moveItemImage(itemId: string, fromIndex: number, toIndex: number): Promise<string[]> {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    const entry = await getEntryById(itemId);
+    const currentPictures = (entry?.pictures ?? []) as (StrapiMedia | number)[];
+
+    const pictureIds = currentPictures
+      .map((pic) => (typeof pic === "number" ? pic : (pic as StrapiMedia).id))
+      .filter((id): id is number => typeof id === "number");
+
+    const clampedTo = Math.max(0, Math.min(toIndex, pictureIds.length - 1));
+    if (fromIndex === clampedTo || fromIndex < 0 || fromIndex >= pictureIds.length) {
+      return entry?.pictureUrls ?? [];
+    }
+
+    const nextPictureIds = [...pictureIds];
+    const [moved] = nextPictureIds.splice(fromIndex, 1);
+    nextPictureIds.splice(clampedTo, 0, moved!);
+
+    const res = await fetch(`/api/entries/${encodeURIComponent(itemId)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: entry?.title ?? "Untitled",
+        pictures: nextPictureIds,
+        _auditSection: "images",
+      }),
+    });
+
+    if (!res.ok) {
+      const data = (await res.json()) as { error?: string };
+      throw new Error(data.error ?? "Failed to reorder images.");
+    }
+
+    const updated = (await res.json()) as Entry;
+    const urls = updated.pictureUrls ?? [];
+    cacheEntry(updated);
+    window.localStorage.setItem(getStorageKey(itemId), JSON.stringify(urls));
+    return urls;
+  } catch (error) {
+    console.error("[moveItemImage] Error reordering image:", error);
     throw error;
   }
 }

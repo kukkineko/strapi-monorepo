@@ -489,6 +489,9 @@ export default function ProductPage() {
   const [voteReason, setVoteReason] = useState("");
   const [showVoteReason, setShowVoteReason] = useState(false);
   const [pendingVote, setPendingVote] = useState<1 | -1 | null>(null);
+  const [uploadingImages, setUploadingImages] = useState(false);
+  const [imageUploadError, setImageUploadError] = useState<string | null>(null);
+  const imageUploadInputRef = useRef<HTMLInputElement>(null);
 
   const imageList = useMemo(() => entry?.pictureUrls ?? [], [entry?.pictureUrls]);
 
@@ -1464,6 +1467,36 @@ export default function ProductPage() {
     }
   }
 
+  async function handleAddImages(files: File[]) {
+    if (files.length === 0 || !entry || !entryId || uploadingImages) return;
+
+    try {
+      setUploadingImages(true);
+      setImageUploadError(null);
+      const uploadedIds = await uploadMedia(files);
+      const existingIds = toMediaIds(entry.pictures) ?? [];
+      const mergedIds = Array.from(new Set([...existingIds, ...uploadedIds]));
+      const fullPayload = buildEntryPayload(entry, { pictures: mergedIds });
+      const res = await fetch(`/api/entries/${encodeURIComponent(entryId)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...fullPayload, _auditSection: "images" }),
+      });
+      if (!res.ok) {
+        const data = (await res.json()) as { error?: string };
+        throw new Error(data.error ?? "Failed to upload images.");
+      }
+      const updated = (await res.json()) as Entry;
+      setEntry(updated);
+      setImageIndex(existingIds.length); // jump to the first newly added image
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to upload images.";
+      setImageUploadError(message);
+    } finally {
+      setUploadingImages(false);
+    }
+  }
+
   async function castVote(targetId: string, vote: 1 | -1 | 0, reason?: string) {
     if (!entryId || votingLinkId) return;
     setVotingLinkId(targetId);
@@ -1809,7 +1842,43 @@ export default function ProductPage() {
               </div>
 
               <div className="wiki-panel wiki-media-panel wiki-detail-images">
-                <h2>{t.page.images}</h2>
+                <div className="wiki-section-header">
+                  <h2>{t.page.images}</h2>
+                  {authUser?.trusted && (
+                    <>
+                      <button
+                        type="button"
+                        className="wiki-section-trigger"
+                        onClick={() => imageUploadInputRef.current?.click()}
+                        disabled={uploadingImages}
+                        aria-label={t.page.addImages}
+                        title={t.page.addImages}
+                      >
+                        <Image
+                          src={SECTION_ADD_ICON}
+                          alt=""
+                          aria-hidden="true"
+                          width={SECTION_ADD_ICON_SIZE}
+                          height={SECTION_ADD_ICON_SIZE}
+                          style={{ transform: `translateY(-${SECTION_ADD_ICON_OFFSET_Y}px)` }}
+                        />
+                      </button>
+                      <input
+                        ref={imageUploadInputRef}
+                        type="file"
+                        multiple
+                        accept="image/*"
+                        style={{ display: "none" }}
+                        onChange={(event) => {
+                          const files = Array.from(event.target.files ?? []);
+                          event.target.value = "";
+                          if (files.length > 0) void handleAddImages(files);
+                        }}
+                      />
+                    </>
+                  )}
+                </div>
+                {imageUploadError && <p className="wiki-error">{imageUploadError}</p>}
                 <div className="wiki-carousel">
                   {imageList.length > 0 ? (
                     <>
@@ -3051,7 +3120,7 @@ export default function ProductPage() {
                       {authUser && (
                         <div style={{ marginTop: "0.75rem" }}>
                           <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
-                            <span style={{ fontSize: "0.8rem", color: "#64748b" }}>Confidence:</span>
+                            <span style={{ fontSize: "0.8rem", color: "var(--muted)" }}>Confidence:</span>
                             <button
                               type="button"
                               title="Thumbs up — I agree with this link"
@@ -3102,7 +3171,7 @@ export default function ProductPage() {
                             >
                               👎 {downCount > 0 ? downCount : ""}
                             </button>
-                            {votingLinkId === targetId && <span style={{ fontSize: "0.75rem", color: "#94a3b8" }}>…</span>}
+                            {votingLinkId === targetId && <span style={{ fontSize: "0.75rem", color: "var(--muted)" }}>…</span>}
                           </div>
                           {showVoteReason && (
                             <div

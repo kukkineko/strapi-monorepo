@@ -187,7 +187,7 @@ function isCacheFresh<T>(record: CacheRecord<T> | null | undefined): record is C
   return Boolean(record && Date.now() < record.expiresAt);
 }
 
-function cacheEntry(entry: Entry) {
+export function cacheEntry(entry: Entry) {
   const record: CacheRecord<Entry> = {
     value: entry,
     expiresAt: Date.now() + CACHE_TTL_MS,
