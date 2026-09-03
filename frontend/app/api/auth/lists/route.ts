@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSessionJwt, loadUserContext, updateMe } from "@/app/lib/auth-server";
 import { sanitizeProjects, type Project } from "@/app/lib/list-types";
+import { removeSharedList, upsertSharedList } from "@/app/lib/shared-lists";
 
 export async function GET() {
   const jwt = await getSessionJwt();
@@ -13,7 +14,11 @@ export async function GET() {
     return NextResponse.json({ lists: [] as Project[] }, { status: 401 });
   }
 
-  return NextResponse.json({ lists: context.user.lists });
+  // ownerId lets the client (app/lib/lists.ts) detect "this browser's cached
+  // lists belong to a different account" — e.g. two people signing into
+  // their own accounts on the same shared computer — and discard the stale
+  // cache instead of migrating it onto whoever is signed in now.
+  return NextResponse.json({ lists: context.user.lists, ownerId: context.user.documentId });
 }
 
 export async function POST(request: Request) {
@@ -38,6 +43,24 @@ export async function POST(request: Request) {
 
   // Sanitize before persisting so only well-formed project data is stored.
   const lists = sanitizeProjects(body.lists);
+
+  // Keep the cross-user shared-list store (app/lib/shared-lists.ts) in step
+  // with whatever this save actually contains: refresh the snapshot for any
+  // list that still carries a shareCode, and drop codes that were unshared
+  // (or whose list was deleted) since the previous save — there's no separate
+  // "unshare" endpoint, this diff against the previous saved state is the
+  // only place that transition is visible.
+  const previousCodes = new Set(
+    context.user.lists.map((p) => p.shareCode).filter((c): c is string => Boolean(c)),
+  );
+  const nextCodes = new Map(
+    lists.filter((p): p is Project & { shareCode: string } => Boolean(p.shareCode)).map((p) => [p.shareCode, p]),
+  );
+  const ownerUserId = context.user.documentId;
+  await Promise.all([
+    ...[...previousCodes].filter((code) => !nextCodes.has(code)).map((code) => removeSharedList(ownerUserId, code)),
+    ...[...nextCodes.entries()].map(([code, project]) => upsertSharedList(ownerUserId, code, project)),
+  ]);
 
   const updated = await updateMe(jwt, { lists });
   if (!updated) {

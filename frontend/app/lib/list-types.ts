@@ -26,6 +26,15 @@ export type Project = {
   items: ListItem[];
   createdAt: number;
   updatedAt: number;
+  /**
+   * Short public code that lets another user look up a read-only snapshot of
+   * this list (see /api/auth/lists/share) and copy it into their own lists.
+   * Unset until the owner shares the list. See {@link SHARE_CODE_PATTERN} for
+   * the exact format — generation lives server-side in app/lib/shared-lists.ts
+   * (this module stays framework/runtime-agnostic), but the alphabet is
+   * defined once here so client-side validation can't drift from it.
+   */
+  shareCode?: string;
 };
 
 export function generateListId(): string {
@@ -33,6 +42,22 @@ export function generateListId(): string {
     return crypto.randomUUID();
   }
   return `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/* ─── share codes ────────────────────────────────────────────────────────────
+ * Crockford-style base32 minus the easily-confused characters (0/O, 1/I/L) so
+ * a code can be read aloud or hand-typed without ambiguity. 31 symbols ^ 8
+ * chars ≈ 8.5×10^11 possible codes — not brute-forceable, especially combined
+ * with the redeem endpoint's rate limit (see app/api/auth/lists/share/[code]).
+ */
+export const SHARE_CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+export const SHARE_CODE_LENGTH = 8;
+export const SHARE_CODE_PATTERN = new RegExp(`^[${SHARE_CODE_ALPHABET}]{${SHARE_CODE_LENGTH}}$`);
+
+export function normalizeShareCode(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const upper = value.trim().toUpperCase();
+  return SHARE_CODE_PATTERN.test(upper) ? upper : undefined;
 }
 
 function sanitizeItem(raw: unknown): ListItem | null {
@@ -67,6 +92,7 @@ export function sanitizeProject(raw: unknown): Project | null {
     items,
     createdAt: Number.isFinite(createdAt) ? createdAt : Date.now(),
     updatedAt: Number.isFinite(updatedAt) ? updatedAt : Date.now(),
+    shareCode: normalizeShareCode(r.shareCode),
   };
 }
 

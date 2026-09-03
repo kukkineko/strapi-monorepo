@@ -3,6 +3,7 @@
 import { useCallback, useSyncExternalStore } from "react";
 import {
   generateListId,
+  sanitizeProject,
   sanitizeProjects,
   type ListItem,
   type Project,
@@ -26,6 +27,8 @@ export type { ListItem, Project } from "@/app/lib/list-types";
  */
 
 const STORAGE_KEY = "wiki-lists-v1";
+/** Which account's data STORAGE_KEY currently holds — see loadFromServer(). */
+const OWNER_KEY = "wiki-lists-owner-v1";
 /** Broadcast within the same tab; `storage` events only fire in *other* tabs. */
 const CHANGE_EVENT = "wiki-lists-change";
 const API_URL = "/api/auth/lists";
@@ -122,14 +125,35 @@ async function saveToServer() {
  * Load the authoritative copy from the server once per session. The server
  * copy wins; but if the server has nothing yet and this browser still holds
  * lists locally, push them up so the earlier local-only data isn't lost.
+ *
+ * SAFETY: STORAGE_KEY is one shared localStorage slot per browser origin, not
+ * per account — if a different user previously signed into their own account
+ * on this same browser, `getSnapshot()` would otherwise return THEIR cached
+ * lists. Blindly treating that as "pre-existing local-only data to migrate
+ * up" would silently copy one user's lists (share codes included) onto
+ * another's. OWNER_KEY records which account's data is currently cached; a
+ * mismatch means this cache belongs to someone else, so it's discarded (the
+ * server's copy, even if empty, wins) instead of migrated.
  */
 async function loadFromServer() {
   if (typeof window === "undefined") return;
   try {
     const res = await fetch(API_URL);
     if (!res.ok) return;
-    const data = (await res.json()) as { lists?: unknown };
+    const data = (await res.json()) as { lists?: unknown; ownerId?: unknown };
+    const ownerId = typeof data.ownerId === "string" ? data.ownerId : "";
     const serverLists = sanitizeProjects(data.lists);
+
+    const cachedOwner = window.localStorage.getItem(OWNER_KEY);
+    if (ownerId) window.localStorage.setItem(OWNER_KEY, ownerId);
+
+    if (cachedOwner && ownerId && cachedOwner !== ownerId) {
+      // Different account than whoever's data this cache last held — never
+      // migrate it, adopt the server's copy even if that's empty.
+      setLocal(serverLists);
+      return;
+    }
+
     const local = getSnapshot();
     if (serverLists.length > 0) {
       setLocal(serverLists);
@@ -256,6 +280,73 @@ export function renumberProject(projectId: string) {
       return { ...p, items: ordered.map((i, idx) => ({ ...i, position: idx + 1 })) };
     }),
   );
+}
+
+/* ─── sharing ────────────────────────────────────────────────────────────── */
+
+/**
+ * Share a project: mints a code the caller can hand to another user (see
+ * /api/auth/lists/share). Idempotent — a project keeps the same code across
+ * repeated calls; the debounced bulk-save already keeps the shared snapshot
+ * fresh as the list is edited (see the /api/auth/lists route's shared-store
+ * sync), so this only needs to run once per list.
+ */
+export async function shareProject(projectId: string): Promise<string | null> {
+  const project = getSnapshot().find((p) => p.id === projectId);
+  if (!project) return null;
+  if (project.shareCode) return project.shareCode;
+
+  try {
+    const res = await fetch(`${API_URL}/share`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId: project.id, name: project.name, items: project.items }),
+    });
+    const data = (await res.json().catch(() => null)) as { code?: string; error?: string } | null;
+    if (!res.ok || !data?.code) return null;
+    commit(withUpdatedProject(getSnapshot(), projectId, (p) => ({ ...p, shareCode: data.code })));
+    return data.code;
+  } catch {
+    return null;
+  }
+}
+
+/** Revoke a project's share code; the next debounced save removes the shared snapshot server-side. */
+export function unshareProject(projectId: string) {
+  commit(withUpdatedProject(getSnapshot(), projectId, (p) => ({ ...p, shareCode: undefined })));
+}
+
+/**
+ * Fetch a shared list by code and add it as a new list of the caller's own —
+ * a copy, not a live link, so editing it afterwards never touches the
+ * original owner's list.
+ */
+export async function importSharedList(
+  code: string,
+): Promise<{ ok: true; project: Project } | { ok: false; error: string }> {
+  try {
+    const res = await fetch(`${API_URL}/share/${encodeURIComponent(code.trim().toUpperCase())}`);
+    const data = (await res.json().catch(() => null)) as
+      | { name?: unknown; items?: unknown; error?: string }
+      | null;
+    if (!res.ok || !data) {
+      return { ok: false, error: data?.error ?? "List not found." };
+    }
+    const sanitized = sanitizeProject({ name: data.name, items: data.items });
+    if (!sanitized) return { ok: false, error: "List not found." };
+
+    const project: Project = {
+      ...sanitized,
+      id: generateListId(),
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      shareCode: undefined,
+    };
+    commit([...getSnapshot(), project]);
+    return { ok: true, project };
+  } catch {
+    return { ok: false, error: "Network error." };
+  }
 }
 
 /* ─── hooks ─────────────────────────────────────────────────────────────── */

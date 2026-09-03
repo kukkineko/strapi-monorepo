@@ -9,9 +9,12 @@ import {
   addItemToProject,
   createProject,
   deleteProject,
+  importSharedList,
   removeItemFromProject,
   renameProject,
   renumberProject,
+  shareProject,
+  unshareProject,
   updateItem,
   useProject,
   useProjects,
@@ -169,6 +172,125 @@ function ItemRow({ projectId, item }: { projectId: string; item: ListItem }) {
   );
 }
 
+/* ─── share control (generate / copy / revoke a share code) ──────────────── */
+
+function ShareControl({ project }: { project: Project }) {
+  const { t } = useLanguage();
+  const [open, setOpen] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleGenerate() {
+    setGenerating(true);
+    setError("");
+    const code = await shareProject(project.id);
+    setGenerating(false);
+    if (!code) setError(t.lists.shareError);
+  }
+
+  async function handleCopy() {
+    if (!project.shareCode) return;
+    try {
+      await navigator.clipboard.writeText(project.shareCode);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard API unavailable/denied — the code is still shown for
+      // manual selection, so there's nothing else to do here.
+    }
+  }
+
+  function handleStop() {
+    if (window.confirm(t.lists.shareStopConfirm)) unshareProject(project.id);
+  }
+
+  return (
+    <div className="wiki-list-share">
+      <button type="button" className="wiki-button small" onClick={() => setOpen((o) => !o)}>
+        {t.lists.share}
+      </button>
+
+      {open && (
+        <div className="wiki-list-share-panel">
+          <p className="wiki-list-share-desc">{t.lists.shareDesc}</p>
+          {project.shareCode ? (
+            <>
+              <div className="wiki-list-share-code-row">
+                <code className="wiki-list-share-code">{project.shareCode}</code>
+                <button type="button" className="wiki-button small" onClick={() => void handleCopy()}>
+                  {copied ? t.lists.shareCopied : t.lists.shareCopy}
+                </button>
+              </div>
+              <button type="button" className="wiki-button small danger" onClick={handleStop}>
+                {t.lists.shareStop}
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              className="wiki-button small primary"
+              disabled={generating}
+              onClick={() => void handleGenerate()}
+            >
+              {generating ? t.lists.shareGenerating : t.lists.shareGenerate}
+            </button>
+          )}
+          {error && <p className="wiki-error">{error}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── import a shared list by code ────────────────────────────────────────── */
+
+function ImportSharedList({ onImported }: { onImported: (project: Project) => void }) {
+  const { t } = useLanguage();
+  const [code, setCode] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState(false);
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    const trimmed = code.trim();
+    if (!trimmed) return;
+    setLoading(true);
+    setError("");
+    setSuccess(false);
+    const result = await importSharedList(trimmed);
+    setLoading(false);
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    setCode("");
+    setSuccess(true);
+    setTimeout(() => setSuccess(false), 2500);
+    onImported(result.project);
+  }
+
+  return (
+    <form className="wiki-list-import" onSubmit={handleSubmit}>
+      <input
+        type="text"
+        className="wiki-list-import-input"
+        value={code}
+        onChange={(e) => setCode(e.target.value)}
+        placeholder={t.lists.importPlaceholder}
+        aria-label={t.lists.importTitle}
+        autoComplete="off"
+      />
+      <button type="submit" className="wiki-button small" disabled={loading || !code.trim()}>
+        {loading ? t.lists.importAdding : t.lists.importButton}
+      </button>
+      {error && <span className="wiki-error wiki-list-import-msg">{error}</span>}
+      {success && <span className="wiki-list-import-msg success">{t.lists.importSuccess}</span>}
+    </form>
+  );
+}
+
 /* ─── project detail (articles table) ────────────────────────────────────── */
 
 function ProjectDetail({ projectId }: { projectId: string }) {
@@ -191,6 +313,7 @@ function ProjectDetail({ projectId }: { projectId: string }) {
       <div className="wiki-list-detail-head">
         <h2>{project.name}</h2>
         <div className="wiki-list-detail-actions">
+          <ShareControl project={project} />
           <button
             type="button"
             className="wiki-button small"
@@ -289,7 +412,14 @@ function ProjectChip({
   return (
     <div className={`wiki-list-chip${active ? " active" : ""}`}>
       <button type="button" className="wiki-list-chip-main" onClick={onSelect}>
-        <span className="wiki-list-chip-name">{project.name}</span>
+        <span className="wiki-list-chip-name">
+          {project.name}
+          {project.shareCode && (
+            <span className="wiki-list-chip-shared" title={t.lists.shareTitle} aria-label={t.lists.shareTitle}>
+              🔗
+            </span>
+          )}
+        </span>
         <span className="wiki-list-chip-count">
           {project.items.length > 0
             ? `${project.items.length} ${t.lists.items}`
@@ -373,6 +503,8 @@ export function ListsClient() {
             {t.lists.createProject}
           </button>
         </form>
+
+        <ImportSharedList onImported={(project) => setSelectedId(project.id)} />
 
         {projects.length === 0 ? (
           <p className="wiki-muted wiki-list-empty">{t.lists.noProjects}</p>
