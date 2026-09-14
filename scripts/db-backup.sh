@@ -23,7 +23,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-BACKEND_DIR="$REPO_ROOT/backend"
+# Override with BACKEND_DIR=/path env var when the live Strapi instance
+# doesn't live at <repo>/backend (e.g. a dev host where the running backend
+# is a separate root-owned checkout, not the git-tracked one).
+BACKEND_DIR="${BACKEND_DIR:-$REPO_ROOT/backend}"
 ENV_FILE="$BACKEND_DIR/.env"
 UPLOADS_DIR="$BACKEND_DIR/public/uploads"
 
@@ -49,6 +52,45 @@ require_cmd() {
     echo "Missing required command: $1 (try: sudo apt install $1)" >&2
     exit 1
   }
+}
+
+# zip/unzip aren't always installed (and this script shouldn't need sudo to
+# run at all). Prefer the real binaries when present; fall back to Python's
+# stdlib zipfile module — present on essentially every Linux box — so the
+# script still works out of the box.
+make_zip() {
+  local out="$1" dir="$2"
+  if command -v zip >/dev/null 2>&1; then
+    ( cd "$dir" && zip -rq "$out" . )
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -c '
+import os, sys, zipfile
+out, src = sys.argv[1], sys.argv[2]
+with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
+    for root, _, files in os.walk(src):
+        for name in files:
+            full = os.path.join(root, name)
+            zf.write(full, os.path.relpath(full, src))
+' "$out" "$dir"
+  else
+    echo "Need either 'zip' or 'python3' installed to create the archive." >&2
+    exit 1
+  fi
+}
+
+extract_zip() {
+  local zip_path="$1" dest="$2"
+  if command -v unzip >/dev/null 2>&1; then
+    unzip -q "$zip_path" -d "$dest"
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -c '
+import sys, zipfile
+zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])
+' "$zip_path" "$dest"
+  else
+    echo "Need either 'unzip' or 'python3' installed to read the archive." >&2
+    exit 1
+  fi
 }
 
 # Reads only the DATABASE_* keys out of backend/.env. Every other line in
@@ -79,12 +121,15 @@ cmd_export() {
   case "$out" in /*) : ;; *) out="$(pwd)/$out" ;; esac
 
   require_cmd pg_dump
-  require_cmd zip
   load_db_env
 
   local work
   work="$(mktemp -d)"
-  trap 'rm -rf "$work"' EXIT
+  # Bake the path into the trap string NOW (double-quoted), rather than
+  # leaving "$work" to be re-expanded when the trap actually fires — by then
+  # this function's `local work` is out of scope and `set -u` would treat it
+  # as an unbound variable instead of running the cleanup.
+  trap "rm -rf '$work'" EXIT
 
   echo "==> Dumping database '$DB_NAME' from $DB_HOST:$DB_PORT..."
   PGPASSWORD="$DB_PASS" pg_dump \
@@ -110,7 +155,7 @@ JSON
 
   echo "==> Writing $out (excluding .env — secrets never leave this host)..."
   rm -f "$out"
-  ( cd "$work" && zip -rq "$out" database.sql uploads manifest.json )
+  make_zip "$out" "$work"
 
   echo "==> Done: $out ($(du -h "$out" | cut -f1))"
 }
@@ -120,7 +165,6 @@ cmd_import() {
   local assume_yes="${2:-}"
 
   require_cmd psql
-  require_cmd unzip
   load_db_env
 
   [ -f "$zip_path" ] || { echo "File not found: $zip_path" >&2; exit 1; }
@@ -135,10 +179,14 @@ cmd_import() {
 
   local work
   work="$(mktemp -d)"
-  trap 'rm -rf "$work"' EXIT
+  # Bake the path into the trap string NOW (double-quoted), rather than
+  # leaving "$work" to be re-expanded when the trap actually fires — by then
+  # this function's `local work` is out of scope and `set -u` would treat it
+  # as an unbound variable instead of running the cleanup.
+  trap "rm -rf '$work'" EXIT
 
   echo "==> Extracting $zip_path..."
-  unzip -q "$zip_path" -d "$work"
+  extract_zip "$zip_path" "$work"
   [ -f "$work/database.sql" ] || {
     echo "database.sql not found in archive — is this a valid backup?" >&2
     exit 1
