@@ -36,12 +36,6 @@ const nextConfig: NextConfig = {
   cacheComponents: true,
   compress: true,
   poweredByHeader: false,
-  /* pdfjs-dist is ESM-only with an optional native canvas peer dep and a
-     "fake worker" code path that the Next.js bundler trips over. Opting
-     it out routes through Node's native loader and lets us dynamic-import
-     `pdfjs-dist/legacy/build/pdf.mjs` straight from node_modules. Used by
-     the import-data route to extract PDF text server-side. */
-  serverExternalPackages: ["pdfjs-dist"],
   allowedDevOrigins: [
     "localhost",
     "127.0.0.1",

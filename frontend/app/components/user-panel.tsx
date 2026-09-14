@@ -17,7 +17,6 @@ import {
   AuditLogContent,
   DBBackupContent,
   DBStatsContent,
-  ImportDataContent,
   LinkConfidenceContent,
   AssignDocsContent,
   ServerContent,
@@ -571,13 +570,13 @@ function ListsTab({ onClose }: { onClose: () => void }) {
 
 /* ─── AdminTab ───────────────────────────────────────────────────────────── */
 
-type AdminView = null | "users" | "db" | "stats" | "audit" | "import" | "confidence" | "assigndocs" | "server";
+type AdminView = null | "users" | "db" | "stats" | "audit" | "confidence" | "assigndocs" | "server";
 
 const ADMIN_SECTIONS: Array<{
-  id:        "users" | "db" | "stats" | "audit" | "import" | "confidence" | "assigndocs" | "server";
+  id:        "users" | "db" | "stats" | "audit" | "confidence" | "assigndocs" | "server";
   icon:      string;
-  titleKey:  "adminUsersTitle" | "adminAuditTitle" | "adminDbTitle" | "adminStatsTitle" | "adminImportTitle" | "adminConfidenceTitle" | "adminAssignDocsTitle" | "adminServerTitle";
-  descKey:   "adminUsersDesc" | "adminAuditDesc" | "adminDbDesc" | "adminStatsDesc" | "adminImportDesc" | "adminConfidenceDesc" | "adminAssignDocsDesc" | "adminServerDesc";
+  titleKey:  "adminUsersTitle" | "adminAuditTitle" | "adminDbTitle" | "adminStatsTitle" | "adminConfidenceTitle" | "adminAssignDocsTitle" | "adminServerTitle";
+  descKey:   "adminUsersDesc" | "adminAuditDesc" | "adminDbDesc" | "adminStatsDesc" | "adminConfidenceDesc" | "adminAssignDocsDesc" | "adminServerDesc";
   color:     string;
   bg:        string;
   border:    string;
@@ -617,15 +616,6 @@ const ADMIN_SECTIONS: Array<{
     color:    "#0891b2",
     bg:       "#ecfeff",
     border:   "#a5f3fc",
-  },
-  {
-    id:       "import",
-    icon:     "📥",
-    titleKey: "adminImportTitle",
-    descKey:  "adminImportDesc",
-    color:    "#059669",
-    bg:       "#ecfdf5",
-    border:   "#a7f3d0",
   },
   {
     id:       "confidence",
@@ -716,7 +706,6 @@ function AdminTab({ onClose }: { onClose: () => void }) {
       {view === "audit"      && <AuditLogContent />}
       {view === "db"         && <DBBackupContent />}
       {view === "stats"      && <DBStatsContent onClose={onClose} />}
-      {view === "import"     && <ImportDataContent />}
       {view === "confidence" && <LinkConfidenceContent />}
       {view === "assigndocs" && <AssignDocsContent />}
       {view === "server"     && <ServerContent />}

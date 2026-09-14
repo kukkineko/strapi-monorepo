@@ -125,10 +125,10 @@ the frontend `.env.local` as `STRAPI_TOKEN`.
 cd /var/www/app/frontend
 
 cp .env.example .env.local
-# Edit .env.local:
+# Edit .env.local (or paste the token later via the admin panel's
+# "Strapi API Token" field under Server, once the app is running):
 #   STRAPI_URL=http://127.0.0.1:1337
 #   STRAPI_TOKEN=<the token from step 4>
-#   OPENAI_API_KEY=<your key>
 
 npm ci
 npm run build
