@@ -7,7 +7,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { LanguageToggle } from "@/app/components/language-toggle";
 import { ThemeToggle } from "@/app/components/theme-toggle";
 import { useLanguage } from "@/app/components/language-provider";
-import { MimirLogo } from "@/app/components/mimir-logo";
+import { FluidraLogo } from "@/app/components/fluidra-logo";
 import { UserPanel } from "@/app/components/user-panel";
 import { searchEntries, type Entry } from "@/app/lib/entries";
 import { HoverPreview, useHoverPreview } from "@/app/components/hover-preview";
@@ -346,7 +346,7 @@ export function TopBar({ actions }: TopBarProps) {
 
         {/* Logo */}
         <div className="wiki-topbar-logo" aria-label="Logo area">
-          <MimirLogo size="sm" />
+          <FluidraLogo size="sm" />
         </div>
 
         {/* Action icons */}

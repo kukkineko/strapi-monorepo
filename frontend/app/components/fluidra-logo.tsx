@@ -1,11 +1,10 @@
 /**
- * The Mimir mark: a well-ring with a gap in the inner ring (Odin's eye, given
- * up at Mímir's well for a drink of wisdom) plus the MIMIR / DATABASE
- * wordmark. Pure SVG + text rather than a raster logo.png, so it stays crisp
- * at every size this app uses it at and recolors for free via currentColor +
- * the CSS custom properties in globals.css (.mimir-lock).
+ * The Fluidra mark: a ring with a gap in the inner ring, plus the FLUIDRA /
+ * DATABASE wordmark. Pure SVG + text rather than a raster logo.png, so it
+ * stays crisp at every size this app uses it at and recolors for free via
+ * currentColor + the CSS custom properties in globals.css (.fluidra-lock).
  */
-function MimirMark({ size }: { size: number }) {
+function FluidraMark({ size }: { size: number }) {
   return (
     <svg
       width={size}
@@ -17,7 +16,7 @@ function MimirMark({ size }: { size: number }) {
       strokeLinecap="round"
       xmlns="http://www.w3.org/2000/svg"
       role="img"
-      aria-label="Mimir"
+      aria-label="Fluidra"
     >
       <circle cx="32" cy="32" r="28" />
       <circle cx="32" cy="32" r="17" strokeDasharray="76 31" strokeDashoffset="19" />
@@ -28,13 +27,13 @@ function MimirMark({ size }: { size: number }) {
 
 type LogoSize = "default" | "sm" | "xs";
 
-export function MimirLogo({ size = "default" }: { size?: LogoSize }) {
+export function FluidraLogo({ size = "default" }: { size?: LogoSize }) {
   const markSize = size === "default" ? 46 : size === "sm" ? 34 : 24;
   return (
-    <div className={`mimir-lock ${size}`}>
-      <MimirMark size={markSize} />
+    <div className={`fluidra-lock ${size}`}>
+      <FluidraMark size={markSize} />
       <div className="words">
-        <span className="name">Mimir</span>
+        <span className="name">Fluidra</span>
         <span className="under">
           <span>D</span><span>A</span><span>T</span><span>A</span>
           <span>B</span><span>A</span><span>S</span><span>E</span>

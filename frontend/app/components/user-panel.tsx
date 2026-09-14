@@ -805,7 +805,7 @@ export function UserPanel({
       style={{
         position:       "fixed",
         inset:          0,
-        background:     "rgba(0,0,0,0.72)",
+        background:     "var(--dialog-veil)",
         display:        "flex",
         alignItems:     "center",
         justifyContent: "center",
@@ -826,10 +826,11 @@ export function UserPanel({
           display:        "flex",
           flexDirection:  "column",
           borderRadius:   "18px",
-          background:     "linear-gradient(145deg, var(--surface), var(--stage-bg))",
-          boxShadow:      "0 20px 60px rgba(15,23,42,0.35)",
+          /* Level 04 ("Dialog") — the top of the elevation stack. */
+          background:     "var(--dialog-bg)",
+          boxShadow:      "var(--dialog-shadow)",
           overflow:       "hidden",
-          border:         "1px solid var(--line)",
+          border:         "1px solid var(--dialog-border)",
         }}
         onClick={(e) => e.stopPropagation()}
       >

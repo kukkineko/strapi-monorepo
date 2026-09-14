@@ -1,7 +1,7 @@
 ﻿@import "tailwindcss";
 
 :root {
-  /* ── Mimir brand palette (raw) ── */
+  /* ── Fluidra brand palette (raw) ── */
   --deep-blue:  #121232;
   --dusty-pink: #e368fa;
   /* Same hue as dusty-pink (291°), saturation dropped 94%→58%. Raw dusty-pink
@@ -14,10 +14,10 @@
   --warm-white: #f1efe9;
   --cornflower: #8393ff;
   --light-blue: #afeff0;
-  --mimir-orange: #f96638;
-  --mimir-green:  #2fa84f;
-  --mimir-mint:   #91f0a1;
-  --mimir-violet: #ac77e5;
+  --fluidra-orange: #f96638;
+  --fluidra-green:  #2fa84f;
+  --fluidra-mint:   #91f0a1;
+  --fluidra-violet: #ac77e5;
 
   /* Legacy alias — most of this file still refers to the brand blue by this
      name; keeping it means the mode switch below doesn't need every rule
@@ -40,6 +40,39 @@
   --line:       #45457f;
   --line-soft:  #2d2d5c;
   --muted:      #a9acd0;
+
+  /* ── Elevation ("Ebenen") ── five stacking levels, each a step lighter
+     than the last, per the Fluidra design system. 00 is the page itself; 01
+     (surface/line above) is cards, rows and fields; 02 (raised) is a
+     selected/hovered/previewed state one step up; 03 (floating) is menus,
+     tooltips and autocomplete that hover OVER the page flow; 04 (dialog) is
+     modals — the top of the stack. Hover should ever raise an element by
+     exactly one level, never two, so a hovered 01 card reads as 02, never 03. */
+  --l1-bg: var(--surface);
+  --l1-border: var(--line);
+  --l2-bg: var(--raised);
+  --l2-border: #4d4d8f;
+  --l2-shadow: 0 2px 8px rgba(0, 0, 0, 0.38);
+  --l3-bg: #38387a;
+  --l3-border: #58589e;
+  --l3-shadow: 0 8px 24px rgba(0, 0, 0, 0.46);
+  --l4-bg: #45458f;
+  --l4-border: #6767ae;
+  --l4-shadow: 0 24px 56px rgba(0, 0, 0, 0.55);
+  --dialog-veil: rgba(9, 9, 26, 0.68);
+  --page-gradient: radial-gradient(120% 84% at 50% 0%, #262660 0%, #121232 58%, #0d0d24 100%);
+  /* "Aurora" — two soft lights in pink and cornflower, per the design
+     system reserved for login, the homepage and empty states rather than
+     every page. */
+  --hero-gradient: radial-gradient(78% 60% at 18% 0%, rgba(204, 118, 219, 0.16), transparent 62%), radial-gradient(72% 58% at 92% 18%, rgba(131, 147, 255, 0.14), transparent 60%), var(--background);
+  /* Convenience aliases so component CSS can say "floating"/"dialog"
+     instead of remembering which l-number that maps to. */
+  --floating:        var(--l3-bg);
+  --floating-border: var(--l3-border);
+  --floating-shadow: var(--l3-shadow);
+  --dialog-bg:       var(--l4-bg);
+  --dialog-border:   var(--l4-border);
+  --dialog-shadow:   var(--l4-shadow);
   --link:       var(--pink-dim);
   --link-hover: var(--pink-hover);
   --accent:         var(--pink-dim);
@@ -51,10 +84,10 @@
   --accent-ink: var(--deep-blue);
   --second: var(--sunshine);
   --info:   var(--cornflower);
-  --ok:     var(--mimir-mint);
+  --ok:     var(--fluidra-mint);
   --warn:   var(--sunshine);
-  --error:  var(--mimir-orange);
-  --new:    var(--mimir-violet);
+  --error:  var(--fluidra-orange);
+  --new:    var(--fluidra-violet);
 
   --cornflower-tint:   rgba(131, 147, 255, 0.16);
   --cornflower-light:  var(--raised);
@@ -90,8 +123,33 @@
   --line:       #ddd8ce;
   --line-soft:  #e7e3d9;
   --muted:      #565b82;
+
+  /* ── Elevation ── light mode stays white at every level (per the design
+     system) and leans on border + shadow alone to read as "higher". */
+  --l1-bg: var(--surface);
+  --l1-border: var(--line);
+  --l2-bg: #ffffff;
+  --l2-border: #e3ded4;
+  --l2-shadow: 0 1px 3px rgba(18, 18, 50, 0.10);
+  --l3-bg: #ffffff;
+  --l3-border: #e9e4da;
+  --l3-shadow: 0 8px 20px rgba(18, 18, 50, 0.12);
+  --l4-bg: #ffffff;
+  --l4-border: #efeae0;
+  --l4-shadow: 0 24px 48px rgba(18, 18, 50, 0.18);
+  --dialog-veil: rgba(18, 18, 50, 0.4);
+  --page-gradient: radial-gradient(104% 80% at 50% 0%, #fffdfa 0%, #f4f1ea 58%, #ece9e1 100%);
+  /* "Aqua-Hauch" — light aqua as a shimmer top-right, the light-mode
+     counterpart of --hero-gradient's "Aurora" for login/home/empty states. */
+  --hero-gradient: radial-gradient(76% 62% at 88% 0%, rgba(175, 239, 240, 0.62), transparent 62%), var(--background);
+  --floating:        var(--l3-bg);
+  --floating-border: var(--l3-border);
+  --floating-shadow: var(--l3-shadow);
+  --dialog-bg:       var(--l4-bg);
+  --dialog-border:   var(--l4-border);
+  --dialog-shadow:   var(--l4-shadow);
   /* Raw dusty-pink/sunshine read at ~1.1:1 contrast on white — the brand
-     guide (see the Mimir design system) calls for darker stand-ins here as
+     guide (see the Fluidra design system) calls for darker stand-ins here as
      text/link colors. --accent-surface is the one role that keeps the full
      brand pink in light mode (a button counts as a "light surface" itself);
      everywhere else routes through the dimmer --accent. */
@@ -118,7 +176,12 @@
 }
 
 body {
-  background: var(--background);
+  /* Level 00 ("Grund") — the page itself. A radial gradient rather than a
+     flat fill, per the design system: brighter near the top, settling to
+     --background by mid-page. Everything else (l1..l4) sits on top of this
+     as a flat fill, so this is the only place the gradient is used. */
+  background: var(--page-gradient);
+  background-attachment: fixed;
   color: var(--foreground);
   font-family: var(--font-sans);
   font-size: 14px;
@@ -246,21 +309,21 @@ a:hover {
   object-position: left center;
 }
 
-/* ── Mimir logo lockup (mark + wordmark) — see mimir-logo.tsx ── */
-.mimir-lock {
+/* ── Fluidra logo lockup (mark + wordmark) — see fluidra-logo.tsx ── */
+.fluidra-lock {
   display: flex;
   align-items: center;
   gap: 0.55rem;
   flex-shrink: 0;
 }
 
-.mimir-lock svg {
+.fluidra-lock svg {
   color: var(--accent);
   display: block;
   flex: none;
 }
 
-.mimir-lock .words {
+.fluidra-lock .words {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -268,7 +331,7 @@ a:hover {
   align-self: stretch;
 }
 
-.mimir-lock .name {
+.fluidra-lock .name {
   font-family: var(--font-display);
   font-weight: 600;
   font-size: 1.75rem;
@@ -279,7 +342,7 @@ a:hover {
   white-space: nowrap;
 }
 
-.mimir-lock .under {
+.fluidra-lock .under {
   font-family: var(--font-mono);
   font-weight: 500;
   font-size: 0.62rem;
@@ -291,12 +354,12 @@ a:hover {
   justify-content: space-between;
 }
 
-.mimir-lock.sm .name { font-size: 1.28rem; }
-.mimir-lock.sm .under { font-size: 0.48rem; }
+.fluidra-lock.sm .name { font-size: 1.28rem; }
+.fluidra-lock.sm .under { font-size: 0.48rem; }
 
-.mimir-lock.xs { gap: 0.4rem; }
-.mimir-lock.xs .name { font-size: 0.92rem; }
-.mimir-lock.xs .under { font-size: 0.36rem; }
+.fluidra-lock.xs { gap: 0.4rem; }
+.fluidra-lock.xs .name { font-size: 0.92rem; }
+.fluidra-lock.xs .under { font-size: 0.36rem; }
 
 .wiki-topbar-actions {
   display: flex;
@@ -354,7 +417,7 @@ a:hover {
   left: 50%;
   top: calc(100% + 0.35rem);
   transform: translateX(-50%);
-  background: var(--raised);
+  background: var(--floating);
   color: var(--foreground);
   border-radius: 6px;
   font-size: 0.7rem;
@@ -363,6 +426,7 @@ a:hover {
   white-space: nowrap;
   opacity: 0;
   pointer-events: none;
+  box-shadow: var(--floating-shadow);
   transition: opacity 0.14s ease;
 }
 
@@ -444,17 +508,17 @@ a:hover {
 }
 
 .wiki-topbar-search-preview {
+  /* Level 03 ("Schwebend") — hovers over the page flow, one step below a
+     dialog. */
   position: absolute;
   top: calc(100% + 0.45rem);
   left: 0;
   right: 0;
   z-index: 110;
-  border: 1px solid rgba(255, 255, 255, 0.55);
+  border: 1px solid var(--floating-border);
   border-radius: var(--r-lg);
-  background: rgba(252, 250, 246, 0.96);
-  backdrop-filter: blur(24px) saturate(160%);
-  -webkit-backdrop-filter: blur(24px) saturate(160%);
-  box-shadow: 0 20px 50px rgba(0, 26, 112, 0.18);
+  background: var(--floating);
+  box-shadow: var(--floating-shadow);
   overflow: hidden;
 }
 
@@ -695,7 +759,7 @@ a:hover {
 }
 
 .wiki-language-button.active {
-  background: #e0e2ff;
+  background: var(--cornflower-tint);
   border-color: var(--cornflower);
   color: var(--foreground);
 }
@@ -967,6 +1031,10 @@ a:hover {
   flex-direction: column;
   gap: 0;
   padding: 1.4rem 1.4rem 1.2rem;
+  /* "Aurora"/"Aqua-Hauch" — reserved by the design system for login, the
+     homepage and empty states, so only the homepage's own hero card (not
+     the shared .wiki-card base every panel uses) gets the glow. */
+  background: var(--hero-gradient);
 }
 
 .wiki-home-divider {
@@ -1408,9 +1476,9 @@ a:hover {
 }
 
 .wiki-tag-pill {
-  background: #eaeaff;
+  background: var(--cornflower-tint);
   color: var(--foreground);
-  border: 1px solid #c5c8ff;
+  border: 1px solid var(--cornflower-border);
   border-radius: 999px;
   padding: 0.28rem 0.62rem;
   font-size: 0.83rem;
@@ -1664,8 +1732,11 @@ a:hover {
   bottom: 0.65rem;
   left: 50%;
   transform: translateX(-50%);
+  /* Fixed dark chip over the image itself, not the page — its text must
+     stay white in both themes rather than following --foreground (which
+     would turn dark-on-dark in light mode). */
   background: rgba(15, 23, 42, 0.74);
-  color: var(--foreground);
+  color: #f1efe9;
   border-radius: 6px;
   padding: 0.3rem 0.6rem;
   font-size: 0.78rem;
@@ -2047,6 +2118,7 @@ a.wiki-variant-card:active {
 .wiki-list-cards.issues .wiki-note-card {
   background: #fff1f2;
   border-left-color: #e11d48;
+  color: var(--accent-ink);
   padding: 0;
   overflow: hidden;
   min-height: 4.8rem;
@@ -2063,6 +2135,7 @@ a.wiki-variant-card:active {
   background: #fffbeb;
   border-left-style: dashed;
   border-left-color: #d97706;
+  color: var(--accent-ink);
 }
 
 .wiki-list-cards.issues .wiki-note-card.wiki-note-card-inherited:hover,
@@ -2325,6 +2398,7 @@ a.wiki-variant-card:active {
 .wiki-list-cards.docs .wiki-note-card {
   background: #ecfeff;
   border-left-color: #0891b2;
+  color: var(--accent-ink);
   padding: 0;
   overflow: hidden;
   min-height: 4.8rem;
@@ -2351,7 +2425,7 @@ a.wiki-variant-card:active {
 .wiki-modal {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--dialog-veil);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
   display: flex;
@@ -2371,15 +2445,14 @@ a.wiki-variant-card:active {
 }
 
 .wiki-modal-dialog {
+  /* Level 04 ("Dialog") — the top of the stack. */
   width: min(720px, 100%);
   max-height: min(88vh, 920px);
   overflow: auto;
   border-radius: var(--r-xl);
-  border: 1px solid rgba(255, 255, 255, 0.55);
-  background: rgba(252, 250, 246, 0.94);
-  backdrop-filter: blur(28px) saturate(160%);
-  -webkit-backdrop-filter: blur(28px) saturate(160%);
-  box-shadow: 0 20px 60px rgba(0, 26, 112, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  border: 1px solid var(--dialog-border);
+  background: var(--dialog-bg);
+  box-shadow: var(--dialog-shadow);
   padding: 1rem;
 }
 
@@ -2407,7 +2480,7 @@ a.wiki-variant-card:active {
   height: 2.2rem;
   border: 1px solid var(--line-soft);
   border-radius: 999px;
-  background: var(--surface);
+  background: var(--l2-bg);
   color: var(--muted);
   font-size: 1.25rem;
   line-height: 1;
@@ -2652,7 +2725,7 @@ a.wiki-variant-card:active {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--dialog-veil);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
   display: flex;
@@ -2663,18 +2736,17 @@ a.wiki-variant-card:active {
 }
 
 .wiki-modal-content {
+  /* Level 04 ("Dialog"). */
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  background: rgba(252, 250, 246, 0.94);
-  backdrop-filter: blur(28px) saturate(160%);
-  -webkit-backdrop-filter: blur(28px) saturate(160%);
-  border: 1px solid rgba(255, 255, 255, 0.55);
+  background: var(--dialog-bg);
+  border: 1px solid var(--dialog-border);
   border-radius: var(--r-xl);
   padding: 1.5rem;
   max-width: 500px;
   width: 100%;
-  box-shadow: 0 20px 60px rgba(0, 26, 112, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  box-shadow: var(--dialog-shadow);
 }
 
 .wiki-preview-dialog {
@@ -3134,12 +3206,10 @@ a.wiki-variant-card:active {
   top: calc(100% + 0.5rem);
   right: 0;
   min-width: 210px;
-  background: rgba(252, 250, 246, 0.95);
-  backdrop-filter: blur(24px) saturate(160%);
-  -webkit-backdrop-filter: blur(24px) saturate(160%);
-  border: 1px solid rgba(255, 255, 255, 0.55);
+  background: var(--floating);
+  border: 1px solid var(--floating-border);
   border-radius: var(--r-lg);
-  box-shadow: 0 16px 40px rgba(0, 26, 112, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.75);
+  box-shadow: var(--floating-shadow);
   overflow: hidden;
   z-index: 120;
 }
@@ -4044,12 +4114,12 @@ a.wiki-variant-card:active {
 
 .wiki-admin-db-btn.export.done {
   background: #059669;
-  color: var(--foreground);
+  color: var(--warm-white);
 }
 
 .wiki-admin-db-btn.import {
   background: #7c3aed;
-  color: var(--foreground);
+  color: var(--warm-white);
   flex-shrink: 0;
 }
 
@@ -4059,12 +4129,12 @@ a.wiki-variant-card:active {
 
 .wiki-admin-db-btn.import.done {
   background: #059669;
-  color: var(--foreground);
+  color: var(--warm-white);
 }
 
 .wiki-admin-db-btn:not(.export):not(.import) {
   background: #6b7a9e;
-  color: var(--foreground);
+  color: var(--warm-white);
 }
 
 .wiki-admin-db-btn:not(.export):not(.import):hover:not(:disabled) {
@@ -4727,7 +4797,7 @@ a.wiki-variant-card:active {
   font-weight: bold;
   background: #16a34a;
   border: 1px solid #16a34a;
-  color: var(--foreground);
+  color: var(--warm-white);
   border-radius: 5px;
   cursor: pointer;
   transition: background-color 0.12s, border-color 0.12s;
@@ -5197,12 +5267,10 @@ a.wiki-variant-card:active {
   gap: 0.95rem;
   width: min(460px, 92vw);
   padding: 0.85rem 0.95rem;
-  background: linear-gradient(180deg, var(--surface) 0%, var(--surface) 100%);
-  border: 1px solid var(--line);
+  background: var(--floating);
+  border: 1px solid var(--floating-border);
   border-radius: 14px;
-  box-shadow:
-    0 24px 48px -16px rgba(0, 26, 112, 0.24),
-    0 4px 10px -4px rgba(0, 26, 112, 0.10);
+  box-shadow: var(--floating-shadow);
   pointer-events: none;
   animation: wikiImportPreviewIn 140ms ease-out;
 }
@@ -5215,9 +5283,9 @@ a.wiki-variant-card:active {
   left: 22px;
   width: 12px;
   height: 12px;
-  background: var(--surface);
-  border-left: 1px solid var(--line);
-  border-top: 1px solid var(--line);
+  background: var(--floating);
+  border-left: 1px solid var(--floating-border);
+  border-top: 1px solid var(--floating-border);
   transform: rotate(45deg);
   border-top-left-radius: 3px;
 }
@@ -5381,10 +5449,10 @@ a.wiki-variant-card:active {
   left: 0;
   z-index: 70;
   width: min(440px, 92vw);
-  background: var(--surface);
-  border: 1px solid var(--line);
+  background: var(--floating);
+  border: 1px solid var(--floating-border);
   border-radius: 10px;
-  box-shadow: 0 14px 32px -8px rgba(15, 23, 42, 0.3);
+  box-shadow: var(--floating-shadow);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -5942,10 +6010,10 @@ a.wiki-variant-card:active {
   top: calc(100% + 4px);
   right: 0;
   z-index: 400;
-  background: var(--surface);
-  border: 1px solid var(--line);
+  background: var(--floating);
+  border: 1px solid var(--floating-border);
   border-radius: var(--topbar-radius);
-  box-shadow: 0 8px 28px rgba(0, 26, 112, 0.14);
+  box-shadow: var(--floating-shadow);
   min-width: 148px;
   max-height: 300px;
   overflow-y: auto;
@@ -7452,7 +7520,7 @@ span.wiki-relations-list-title {
 .wiki-assign-docs-assign-btn {
   padding: 0.45rem 1.25rem;
   background: #059669;
-  color: var(--foreground);
+  color: var(--warm-white);
   border: none;
   border-radius: 6px;
   font-size: 0.875rem;
@@ -7516,7 +7584,7 @@ span.wiki-relations-list-title {
   align-items: center;
   justify-content: center;
   min-height: 100vh;
-  background: linear-gradient(135deg, var(--background) 0%, var(--stage-bg) 100%);
+  background: var(--hero-gradient);
 }
 
 .wiki-gate-landing {
@@ -7524,7 +7592,7 @@ span.wiki-relations-list-title {
   align-items: center;
   justify-content: center;
   min-height: 100vh;
-  background: linear-gradient(135deg, var(--background) 0%, var(--stage-bg) 100%);
+  background: var(--hero-gradient);
   padding: 2rem;
   position: relative;
 }
@@ -7621,7 +7689,7 @@ span.wiki-relations-list-title {
 .wiki-user-detail-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.5);
+  background: var(--dialog-veil);
   z-index: 100000;
   display: flex;
   align-items: center;
@@ -7630,9 +7698,10 @@ span.wiki-relations-list-title {
 }
 
 .wiki-user-detail-dialog {
-  background: var(--surface);
+  background: var(--dialog-bg);
+  border: 1px solid var(--dialog-border);
   border-radius: 18px;
-  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.35);
+  box-shadow: var(--dialog-shadow);
   width: min(780px, 100%);
   max-height: min(88vh, 900px);
   display: flex;
@@ -8380,9 +8449,10 @@ body {
 }
 .wiki-list-add-results {
   margin-top: 0.5rem;
-  border: 1px solid var(--line);
+  border: 1px solid var(--floating-border);
   border-radius: 12px;
-  background: var(--surface);
+  background: var(--floating);
+  box-shadow: var(--floating-shadow);
   overflow: hidden;
 }
 .wiki-list-add-status {

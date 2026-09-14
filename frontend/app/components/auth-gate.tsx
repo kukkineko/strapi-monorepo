@@ -8,7 +8,7 @@ import { useLanguage } from "@/app/components/language-provider";
 import type { Language } from "@/app/lib/i18n";
 import { Footer } from "@/app/components/footer";
 import { CookieBanner } from "@/app/components/cookie-banner";
-import { MimirLogo } from "@/app/components/mimir-logo";
+import { FluidraLogo } from "@/app/components/fluidra-logo";
 import { ThemeToggle } from "@/app/components/theme-toggle";
 
 type GateState = "loading" | "unauthenticated" | "unconfirmed" | "blocked" | "ok";
@@ -50,7 +50,7 @@ function LandingPage({ onLogin }: { onLogin: (user: AuthUser) => void }) {
 
   const logo = (
     <div className="wiki-gate-logo">
-      <MimirLogo />
+      <FluidraLogo />
     </div>
   );
 
@@ -342,7 +342,7 @@ function PendingPage({
     <div className="wiki-gate-landing">
       <div className="wiki-gate-card">
         <div className="wiki-gate-logo">
-          <MimirLogo />
+          <FluidraLogo />
         </div>
 
         <div className="wiki-gate-pending-icon" aria-hidden="true">⏳</div>
@@ -383,7 +383,7 @@ function BlockedPage({
     <div className="wiki-gate-landing">
       <div className="wiki-gate-card">
         <div className="wiki-gate-logo">
-          <MimirLogo />
+          <FluidraLogo />
         </div>
 
         <div className="wiki-gate-pending-icon" aria-hidden="true">🚫</div>
