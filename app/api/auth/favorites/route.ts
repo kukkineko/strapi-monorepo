@@ -2,10 +2,9 @@ import { NextResponse } from "next/server";
 import {
   getSessionJwt,
   loadUserContext,
-  saveUserSchemaData,
+  updateMe,
   upsertFavoriteIds,
 } from "@/app/lib/auth-server";
-import { readFavIds } from "@/app/lib/auth-types";
 
 export async function GET() {
   const jwt = await getSessionJwt();
@@ -18,7 +17,7 @@ export async function GET() {
     return NextResponse.json({ favorites: [] as string[] }, { status: 401 });
   }
 
-  return NextResponse.json({ favorites: readFavIds(context.user.data) });
+  return NextResponse.json({ favorites: context.user.favorites });
 }
 
 export async function POST(request: Request) {
@@ -32,8 +31,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
   }
 
-  if (!context.schema) {
-    return NextResponse.json({ error: "User schema /api/customusers endpoint is not writable." }, { status: 400 });
+  if (context.user.blocked) {
+    return NextResponse.json({ error: "Your account has been suspended." }, { status: 403 });
   }
 
   const body = (await request.json().catch(() => null)) as { entryId?: unknown; star?: unknown } | null;
@@ -44,17 +43,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "entryId is required." }, { status: 400 });
   }
 
-  const nextFav = upsertFavoriteIds(context.schema.data, entryId, star);
-  const nextData = {
-    ...context.schema.data,
-    fav: nextFav,
-  };
-
-  // Only update the `data` JSON field on the customuser record.
-  const saved = await saveUserSchemaData(context.schema.path, { data: nextData });
-  if (!saved) {
-    return NextResponse.json({ error: "Failed to persist favorites in /api/customusers." }, { status: 500 });
+  const nextFav = upsertFavoriteIds(context.user.favorites, entryId, star);
+  const updated = await updateMe(jwt, { favorites: nextFav });
+  if (!updated) {
+    return NextResponse.json({ error: "Failed to persist favorites." }, { status: 500 });
   }
 
-  return NextResponse.json({ favorites: nextFav });
+  return NextResponse.json({ favorites: updated.favorites });
 }

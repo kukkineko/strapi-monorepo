@@ -30,8 +30,9 @@ module.exports = {
   apps: [
     {
       name: "strapifrontend",
-      script: "node_modules/.bin/next",
-      args: "start",
+      // Run the custom programmatic server (server.js), NOT `next start`.
+      // `next start` is incompatible with PM2 cluster mode — see server.js.
+      script: "server.js",
 
       // ── Clustering ─────────────────────────────────────────────────────
       // -1 = all logical CPUs minus one (leaves headroom for Strapi + OS)

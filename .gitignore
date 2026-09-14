@@ -24,6 +24,9 @@
 .DS_Store
 *.pem
 
+# runtime data (page-view counters, etc. — see app/lib/page-views.ts)
+/data
+
 # debug
 npm-debug.log*
 yarn-debug.log*
@@ -39,3 +42,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# bulk-upload dedup cache
+scripts/.upload-cache.json

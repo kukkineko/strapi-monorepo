@@ -1,32 +1,14 @@
 import { NextResponse } from "next/server";
-import { getSessionJwt, loadUserContext, saveUserSchemaData } from "@/app/lib/auth-server";
 import {
-  toJsonField,
-  toObjectRecord,
-  type AuthUser,
-} from "@/app/lib/auth-types";
+  getSessionJwt,
+  loadUserContext,
+  adminListUsers,
+  adminUpdateUser,
+} from "@/app/lib/auth-server";
+import { normalizeRoles } from "@/app/lib/auth-types";
+import type { AuditLogEntry } from "@/app/lib/audit-log";
 
-const STRAPI_BASE_URL = (process.env.NEXT_PUBLIC_STRAPI_URL ?? "http://localhost:1337").replace(/\/$/, "");
-const STRAPI_API_TOKEN = process.env.STRAPI_TOKEN ?? process.env.NEXT_PUBLIC_STRAPI_TOKEN ?? "";
-
-function parseCustomUser(record: Record<string, unknown>): AuthUser {
-  return {
-    id: Number(record.id) || 0,
-    userID: typeof record.userID === "string" ? record.userID : "",
-    name: toJsonField(record.name),
-    username: toJsonField(record.username),
-    email: typeof record.email === "string" ? record.email : "",
-    company: toJsonField(record.company),
-    data: toObjectRecord(record.data),
-    confirmed: Boolean(record.confirmed),
-    trusted: Boolean(record.trusted),
-    blocked: Boolean(record.blocked),
-    employee: Boolean(record.employee),
-    administrator: Boolean(record.administrator),
-  };
-}
-
-/** GET — list all customuser records (admin only). */
+/** GET — list all appusers (administrator only). */
 export async function GET() {
   const jwt = await getSessionJwt();
   if (!jwt) {
@@ -38,32 +20,11 @@ export async function GET() {
     return NextResponse.json({ error: "Forbidden." }, { status: 403 });
   }
 
-  const response = await fetch(
-    `${STRAPI_BASE_URL}/api/customusers?pagination[pageSize]=100&populate=*`,
-    {
-      headers: {
-        Authorization: `Bearer ${STRAPI_API_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      cache: "no-store",
-    },
-  );
-
-  if (!response.ok) {
-    return NextResponse.json({ users: [] });
-  }
-
-  const payload = (await response.json()) as { data?: unknown[] };
-  const rawList = Array.isArray(payload.data) ? payload.data : [];
-
-  const users: AuthUser[] = rawList
-    .filter((item): item is Record<string, unknown> => item !== null && typeof item === "object")
-    .map((item) => parseCustomUser(item as Record<string, unknown>));
-
+  const users = await adminListUsers(jwt);
   return NextResponse.json({ users });
 }
 
-/** PUT — update boolean flags on a customuser record (admin only). */
+/** PUT — update roles / account status on an appuser (administrator only). */
 export async function PUT(request: Request) {
   const jwt = await getSessionJwt();
   if (!jwt) {
@@ -77,57 +38,87 @@ export async function PUT(request: Request) {
 
   const body = (await request.json().catch(() => null)) as {
     email?: unknown;
+    documentId?: unknown;
     fields?: unknown;
   } | null;
 
   const email = typeof body?.email === "string" ? body.email.trim() : "";
-  const fields = body?.fields && typeof body.fields === "object" && !Array.isArray(body.fields)
-    ? (body.fields as Record<string, unknown>)
-    : null;
+  const documentId = typeof body?.documentId === "string" ? body.documentId.trim() : "";
+  const rawFields =
+    body?.fields && typeof body.fields === "object" && !Array.isArray(body.fields)
+      ? (body.fields as Record<string, unknown>)
+      : null;
 
-  if (!email || !fields) {
-    return NextResponse.json({ error: "email and fields are required." }, { status: 400 });
+  if ((!email && !documentId) || !rawFields) {
+    return NextResponse.json(
+      { error: "A user identifier (email or documentId) and fields are required." },
+      { status: 400 },
+    );
   }
 
-  // Only allow updating boolean flag fields.
-  const allowedKeys = new Set(["confirmed", "trusted", "blocked", "employee", "administrator"]);
-  const sanitized: Record<string, boolean> = {};
-  for (const [key, value] of Object.entries(fields)) {
-    if (allowedKeys.has(key)) {
-      sanitized[key] = Boolean(value);
-    }
+  const fields: { roles?: string[]; blocked?: boolean; confirmed?: boolean } = {};
+  if (Array.isArray(rawFields.roles)) fields.roles = normalizeRoles(rawFields.roles);
+  if (typeof rawFields.blocked === "boolean") fields.blocked = rawFields.blocked;
+  if (typeof rawFields.confirmed === "boolean") fields.confirmed = rawFields.confirmed;
+
+  if (Object.keys(fields).length === 0) {
+    return NextResponse.json(
+      { error: "No valid fields to update (roles, blocked, confirmed)." },
+      { status: 400 },
+    );
   }
 
-  if (Object.keys(sanitized).length === 0) {
-    return NextResponse.json({ error: "No valid fields to update." }, { status: 400 });
-  }
-
-  // Find the customuser by email to get its documentId.
-  const lookupResponse = await fetch(
-    `${STRAPI_BASE_URL}/api/customusers?filters[email][$eq]=${encodeURIComponent(email)}&pagination[pageSize]=1`,
-    {
-      headers: {
-        Authorization: `Bearer ${STRAPI_API_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      cache: "no-store",
-    },
-  );
-
-  if (!lookupResponse.ok) {
-    return NextResponse.json({ error: "Failed to look up user." }, { status: 500 });
-  }
-
-  const lookupPayload = (await lookupResponse.json()) as { data?: Array<{ documentId?: string }> };
-  const docId = lookupPayload.data?.[0]?.documentId;
-  if (!docId) {
-    return NextResponse.json({ error: "User not found." }, { status: 404 });
-  }
-
-  const saved = await saveUserSchemaData(`/api/customusers/${docId}`, sanitized);
-  if (!saved) {
+  const ok = await adminUpdateUser(jwt, { documentId: documentId || undefined, email: email || undefined }, fields);
+  if (!ok) {
     return NextResponse.json({ error: "Failed to update user." }, { status: 500 });
   }
 
   return NextResponse.json({ ok: true });
+}
+
+/** PATCH — remove specific audit-log entries from a user (administrator only). */
+export async function PATCH(request: Request) {
+  const jwt = await getSessionJwt();
+  if (!jwt) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+
+  const context = await loadUserContext(jwt);
+  if (!context?.user?.administrator) {
+    return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+  }
+
+  const body = (await request.json().catch(() => null)) as {
+    email?: unknown;
+    removeAuditTimestamps?: unknown;
+  } | null;
+
+  const email = typeof body?.email === "string" ? body.email.trim() : "";
+  const toRemove: string[] = Array.isArray(body?.removeAuditTimestamps)
+    ? (body!.removeAuditTimestamps as unknown[])
+        .filter((t): t is string => typeof t === "string")
+    : [];
+
+  if (!email || toRemove.length === 0) {
+    return NextResponse.json(
+      { error: "email and removeAuditTimestamps (non-empty array) are required." },
+      { status: 400 },
+    );
+  }
+
+  const users = await adminListUsers(jwt);
+  const target = users.find((u) => u.email === email);
+  if (!target) {
+    return NextResponse.json({ error: "User not found." }, { status: 404 });
+  }
+
+  const removeSet = new Set(toRemove);
+  const nextLog: AuditLogEntry[] = target.auditLog.filter(
+    (e) => !removeSet.has(e.timestamp),
+  );
+
+  const ok = await adminUpdateUser(jwt, { email }, { auditLog: nextLog });
+  if (!ok) {
+    return NextResponse.json({ error: "Failed to update audit log." }, { status: 500 });
+  }
+
+  return NextResponse.json({ ok: true, remaining: nextLog.length });
 }

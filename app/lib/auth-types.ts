@@ -1,79 +1,153 @@
+import type { AuditLogEntry } from "@/app/lib/audit-log";
+import { sanitizeProjects, type Project } from "@/app/lib/list-types";
+
+/**
+ * The single application user, as consumed by the frontend.
+ *
+ * The backend now exposes one `appuser` record (see /api/app-auth) carrying a
+ * normalized shape: `firstName`/`lastName`/`company` strings, a `roles` array,
+ * and `favorites`/`auditLog` arrays. To keep the many existing UI/gating call
+ * sites working unchanged, this type ALSO retains the legacy JSON-record fields
+ * (`name`, `username`, `company`) and the derived permission booleans
+ * (`trusted`/`employee`/`administrator`). `roles` is the source of truth; the
+ * booleans are computed from it via {@link mapApiUserToAuthUser}.
+ */
 export type AuthUser = {
   id: number;
+  documentId: string;
   userID: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  companyName: string;
+  /** Legacy display shapes — kept so display helpers keep working. */
   name: Record<string, unknown>;
   username: Record<string, unknown>;
-  email: string;
   company: Record<string, unknown>;
+  /** Canonical role list (editor | staff | administrator). */
+  roles: string[];
+  favorites: string[];
+  /** "Liste erstellen" project lists, persisted on the appuser record. */
+  lists: Project[];
+  auditLog: AuditLogEntry[];
+  /** Legacy `{ fav, auditLog }` bag — kept for readFavIds() compatibility. */
   data: Record<string, unknown>;
   confirmed: boolean;
-  trusted: boolean;
   blocked: boolean;
+  /** Derived from `roles` for backward-compatible permission gates. */
+  trusted: boolean;
   employee: boolean;
   administrator: boolean;
 };
+
+/* ─── roles ─────────────────────────────────────────────────────────────── */
+
+export const ROLES = ["editor", "staff", "administrator"] as const;
+export type Role = (typeof ROLES)[number];
+
+/** Human labels for the role UI. */
+export const ROLE_LABELS: Record<Role, string> = {
+  editor: "Editor (edit entries)",
+  staff: "Staff (sees internal fields)",
+  administrator: "Administrator (full admin)",
+};
+
+export function normalizeRoles(value: unknown): Role[] {
+  if (!Array.isArray(value)) return [];
+  const out: Role[] = [];
+  for (const item of value) {
+    const r = String(item).trim().toLowerCase();
+    if ((ROLES as readonly string[]).includes(r) && !out.includes(r as Role)) {
+      out.push(r as Role);
+    }
+  }
+  return out;
+}
+
+export function hasRole(user: Pick<AuthUser, "roles"> | null | undefined, role: Role): boolean {
+  return Boolean(user && Array.isArray(user.roles) && user.roles.includes(role));
+}
+
+/* ─── record helpers ────────────────────────────────────────────────────── */
 
 export function toObjectRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return {};
   }
-
   return value as Record<string, unknown>;
 }
 
 /**
- * Normalise a Strapi JSON field into a Record.  If the API returns a raw
- * string (e.g. `"johndoe"`) instead of an object, it is wrapped as
- * `{ value: <string> }` so callers always get a Record.
+ * Normalise a value into a Record. Raw strings (e.g. `"johndoe"`) are wrapped
+ * as `{ value: <string> }` so callers always get a Record.
  */
 export function toJsonField(value: unknown): Record<string, unknown> {
-  if (!value) {
-    return {};
-  }
-
+  if (!value) return {};
   if (typeof value === "object" && !Array.isArray(value)) {
     return value as Record<string, unknown>;
   }
-
   if (typeof value === "string") {
     const trimmed = value.trim();
-    if (!trimmed) {
-      return {};
-    }
-
+    if (!trimmed) return {};
     try {
       const parsed = JSON.parse(trimmed) as unknown;
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
         return parsed as Record<string, unknown>;
       }
-
       return { value: parsed };
     } catch {
       return { value: trimmed };
     }
   }
-
   return { value };
 }
 
-function toBooleanLike(value: unknown): boolean {
-  if (typeof value === "boolean") {
-    return value;
-  }
+/* ─── API → AuthUser mapping ────────────────────────────────────────────── */
 
-  if (typeof value === "string") {
-    const lowered = value.trim().toLowerCase();
-    if (!lowered) {
-      return false;
-    }
+/**
+ * Map a sanitized appuser from the /api/app-auth endpoints into the {@link
+ * AuthUser} shape the frontend expects, deriving the legacy display records and
+ * the permission booleans from the canonical fields.
+ */
+export function mapApiUserToAuthUser(api: unknown): AuthUser | null {
+  const r = toObjectRecord(api);
+  const id = Number(r.id);
+  if (!Number.isFinite(id) || id <= 0) return null;
 
-    return lowered === "true" || lowered === "1" || lowered === "yes";
-  }
+  const roles = normalizeRoles(r.roles);
+  const favorites = Array.isArray(r.favorites) ? r.favorites.map((v) => String(v)).filter(Boolean) : [];
+  const lists = sanitizeProjects(r.lists);
+  const auditLog = Array.isArray(r.auditLog) ? (r.auditLog as AuditLogEntry[]) : [];
+  const firstName = typeof r.firstName === "string" ? r.firstName : "";
+  const lastName = typeof r.lastName === "string" ? r.lastName : "";
+  const companyName = typeof r.company === "string" ? r.company : "";
+  const username = typeof r.username === "string" ? r.username : "";
 
-  return Boolean(value);
+  return {
+    id,
+    documentId: typeof r.documentId === "string" ? r.documentId : "",
+    userID: username,
+    email: typeof r.email === "string" ? r.email : "",
+    firstName,
+    lastName,
+    companyName,
+    name: { name: firstName, surname: lastName },
+    username: { value: username },
+    company: companyName ? { name: companyName } : {},
+    roles,
+    favorites,
+    lists,
+    auditLog,
+    data: { fav: favorites, auditLog },
+    confirmed: Boolean(r.confirmed),
+    blocked: Boolean(r.blocked),
+    trusted: roles.includes("editor") && !Boolean(r.blocked),
+    employee: roles.includes("staff") && !Boolean(r.blocked),
+    administrator: roles.includes("administrator") && !Boolean(r.blocked),
+  };
 }
 
-/* --------------- Display helpers for JSON fields --------------- */
+/* ─── display helpers (unchanged shapes) ────────────────────────────────── */
 
 /** Extract a display string from the `name` JSON field ({name, surname}). */
 export function displayName(name: Record<string, unknown>): string {
@@ -87,17 +161,14 @@ export function displayUsername(username: Record<string, unknown>): string {
   if (typeof username.value === "string" && username.value.trim()) {
     return username.value.trim();
   }
-
   if (typeof username.display === "string" && username.display.trim()) {
     return username.display.trim();
   }
-
   for (const val of Object.values(username)) {
     if (typeof val === "string" && val.trim()) {
       return val.trim();
     }
   }
-
   return "";
 }
 
@@ -106,148 +177,26 @@ export function displayCompany(company: Record<string, unknown>): string {
   if (typeof company.name === "string" && company.name.trim()) {
     return company.name.trim();
   }
-
   if (typeof company.value === "string" && company.value.trim()) {
     return company.value.trim();
   }
-
   for (const val of Object.values(company)) {
     if (typeof val === "string" && val.trim()) {
       return val.trim();
     }
   }
-
   return "";
 }
 
+/* ─── favorites ─────────────────────────────────────────────────────────── */
+
 export function readFavIds(data: unknown): string[] {
+  // Accept either the legacy `{ fav: [...] }` bag or a raw array.
+  if (Array.isArray(data)) {
+    return data.map((item) => String(item).trim()).filter(Boolean);
+  }
   const record = toObjectRecord(data);
   const rawFav = record.fav;
-
-  if (!Array.isArray(rawFav)) {
-    return [];
-  }
-
-  return rawFav
-    .map((item) => String(item).trim())
-    .filter(Boolean);
-}
-
-export function parseNameSurnameValue(value: unknown): {
-  firstName: string;
-  surname: string;
-  displayName: string;
-  rawJson: string;
-} {
-  const asString = typeof value === "string" ? value.trim() : "";
-  const asObject = toObjectRecord(value);
-  const objectFirstName = typeof asObject.name === "string" ? asObject.name.trim() : "";
-  const objectSurname = typeof asObject.surname === "string" ? asObject.surname.trim() : "";
-  const objectDisplayName = [objectFirstName, objectSurname].filter(Boolean).join(" ").trim();
-  const fallback = {
-    firstName: objectFirstName,
-    surname: objectSurname,
-    displayName: objectDisplayName || asString,
-    rawJson: asString || JSON.stringify(asObject),
-  };
-
-  if (!asString && !objectDisplayName) {
-    return fallback;
-  }
-
-  try {
-    const parsed = JSON.parse(asString) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return fallback;
-    }
-
-    const source = parsed as { name?: unknown; surname?: unknown };
-    const firstName = typeof source.name === "string" ? source.name.trim() : "";
-    const surname = typeof source.surname === "string" ? source.surname.trim() : "";
-    const displayNameValue = [firstName, surname].filter(Boolean).join(" ").trim();
-
-    return {
-      firstName,
-      surname,
-      displayName: displayNameValue,
-      rawJson: asString,
-    };
-  } catch {
-    return fallback;
-  }
-}
-
-export function buildNameJson(firstName: string, surname: string): Record<string, unknown> {
-  return {
-    name: firstName.trim(),
-    surname: surname.trim(),
-  };
-}
-
-export function buildUsernameJson(value: string): Record<string, unknown> {
-  return { value: value.trim() };
-}
-
-export function buildCompanyJson(value: string): Record<string, unknown> {
-  return value.trim() ? { name: value.trim() } : {};
-}
-
-export function hydrateAuthUserFromProfile<T extends AuthUser>(user: T, profile: unknown): T {
-  const profileRecord = toObjectRecord(profile);
-  const profileData = toObjectRecord(profileRecord.data);
-
-  // Resolve the name JSON field (try `name` first, fall back to legacy `name_Surname`)
-  const rawName = profileRecord.name ?? profileData.name ?? profileRecord.name_Surname ?? profileData.name_Surname;
-  const nameJson = toJsonField(rawName);
-  const hasName = Object.keys(nameJson).length > 0;
-
-  const rawUsername = profileRecord.username ?? profileData.username;
-  const usernameJson = toJsonField(rawUsername);
-  const hasUsername = Object.keys(usernameJson).length > 0;
-
-  const rawCompany = profileRecord.company ?? profileData.company;
-  const companyJson = toJsonField(rawCompany);
-  const hasCompany = Object.keys(companyJson).length > 0;
-
-  const rawUserID = profileRecord.userID ?? profileData.userID;
-  const userID = typeof rawUserID === "string" ? rawUserID.trim() : "";
-
-  return {
-    ...user,
-    userID: userID || user.userID,
-    name: hasName ? nameJson : user.name,
-    username: hasUsername ? usernameJson : user.username,
-    company: hasCompany ? companyJson : user.company,
-    confirmed:
-      Object.prototype.hasOwnProperty.call(profileRecord, "confirmed")
-        ? toBooleanLike(profileRecord.confirmed)
-        : Object.prototype.hasOwnProperty.call(profileData, "confirmed")
-          ? toBooleanLike(profileData.confirmed)
-          : user.confirmed,
-    trusted:
-      Object.prototype.hasOwnProperty.call(profileRecord, "trusted")
-        ? toBooleanLike(profileRecord.trusted)
-        : Object.prototype.hasOwnProperty.call(profileData, "trusted")
-          ? toBooleanLike(profileData.trusted)
-          : user.trusted,
-    blocked:
-      Object.prototype.hasOwnProperty.call(profileRecord, "blocked")
-        ? toBooleanLike(profileRecord.blocked)
-        : Object.prototype.hasOwnProperty.call(profileData, "blocked")
-          ? toBooleanLike(profileData.blocked)
-          : user.blocked,
-    administrator:
-      Object.prototype.hasOwnProperty.call(profileRecord, "administrator")
-        ? toBooleanLike(profileRecord.administrator)
-        : Object.prototype.hasOwnProperty.call(profileData, "administrator")
-          ? toBooleanLike(profileData.administrator)
-          : user.administrator,
-    employee:
-      Object.prototype.hasOwnProperty.call(profileRecord, "employee")
-        ? toBooleanLike(profileRecord.employee)
-        : Object.prototype.hasOwnProperty.call(profileData, "employee")
-          ? toBooleanLike(profileData.employee)
-          : user.employee,
-    data: Object.keys(profileData).length > 0 ? profileData : user.data,
-  };
+  if (!Array.isArray(rawFav)) return [];
+  return rawFav.map((item) => String(item).trim()).filter(Boolean);
 }

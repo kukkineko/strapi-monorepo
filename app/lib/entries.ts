@@ -22,7 +22,7 @@ export type Entry = {
   title: string;
   artNr?: string;
   EAN?: string;
-  rubrik?: string | Record<string, unknown>;
+  rubrik?: string | string[] | Record<string, unknown>;
   desc?: string;
   tags?: string;
   docs?: string;
@@ -50,8 +50,13 @@ export type EntryPayload = {
   igs?: string;
   pictures?: number[] | StrapiMedia[];
   miscFile?: number[] | StrapiMedia[];
-  rubrik?: string | Record<string, unknown>;
+  rubrik?: string | string[] | Record<string, unknown>;
 };
+
+/** The two artNr-ordered neighbourhoods around an entry (see getArtNrNeighbors). */
+export type EntryNeighbors = { before: Entry[]; after: Entry[] };
+
+export type LinkVote = { v: 1 | -1; r?: string };
 
 export type LinkEntry = {
   id: string;
@@ -59,6 +64,7 @@ export type LinkEntry = {
   source?: string;
   link?: string;
   desc?: string;
+  votes?: Record<string, LinkVote>;
 };
 
 export function parseLinkEntries(value?: string): LinkEntry[] {
@@ -81,6 +87,7 @@ export function parseLinkEntries(value?: string): LinkEntry[] {
               source?: unknown;
               link?: unknown;
               desc?: unknown;
+              votes?: unknown;
             };
             return {
               id: e.id.trim(),
@@ -88,6 +95,7 @@ export function parseLinkEntries(value?: string): LinkEntry[] {
               ...(typeof e.source === "string" && e.source && { source: e.source }),
               ...(typeof e.link === "string" && e.link && { link: e.link }),
               ...(typeof e.desc === "string" && e.desc && { desc: e.desc }),
+              ...(e.votes && typeof e.votes === "object" && !Array.isArray(e.votes) ? { votes: e.votes as Record<string, LinkVote> } : {}),
             };
           }
           return null;
@@ -113,12 +121,15 @@ export function serializeLinkEntries(values: LinkEntry[]): string {
         ...(e.source && { source: e.source }),
         ...(e.link && { link: e.link }),
         ...(e.desc && { desc: e.desc }),
+        ...(e.votes && Object.keys(e.votes).length > 0 && { votes: e.votes }),
       }))
       .filter((e) => e.id)
   );
 }
 
-const STRAPI_URL = process.env.NEXT_PUBLIC_STRAPI_URL ?? "http://localhost:1337";
+// Server-only. The browser must never hold the Strapi URL or token — all
+// browser data access goes through the Next.js /api/* routes below.
+const STRAPI_URL = process.env.STRAPI_URL ?? "http://localhost:1337";
 const POPULATE_QUERY = "?populate[0]=pictures&populate[1]=miscFile";
 // Lighter field projection for the listing page: drops docs/links/issues/
 // tickets/miscFile so the RSC payload sent to 50 browsers is far smaller.
@@ -127,7 +138,16 @@ const LIST_FIELDS_QUERY =
   "&fields[3]=artNr&fields[4]=EAN&fields[5]=rubrik" +
   "&fields[6]=tags&fields[7]=desc&fields[8]=IGS" +
   "&fields[9]=updatedAt&populate[0]=pictures";
+// Light projection for the artNr-neighbours window on the product page: just
+// enough to render a row (id/documentId/title/artNr/EAN) plus the first picture
+// for a thumbnail.
+const NEIGHBOR_FIELDS_QUERY =
+  "?fields[0]=id&fields[1]=documentId&fields[2]=title" +
+  "&fields[3]=artNr&fields[4]=EAN&populate[0]=pictures";
 const LIST_PAGE_SIZE = 100;
+// The listing page loads only this many of the most-recently-updated entries
+// up front; everything else is reachable via the server search endpoint.
+const RECENT_LIMIT = 300;
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
 type CacheRecord<T> = {
@@ -137,10 +157,12 @@ type CacheRecord<T> = {
 
 let listEntriesCache: CacheRecord<Entry[]> | null = null;
 let listEntriesInFlight: Promise<Entry[]> | null = null;
-let listEntriesForListCache: CacheRecord<Entry[]> | null = null;
-let listEntriesForListInFlight: Promise<Entry[]> | null = null;
-let listEntriesLightCache: CacheRecord<Entry[]> | null = null;
-let listEntriesLightInFlight: Promise<Entry[]> | null = null;
+let listRecentEntriesCache: CacheRecord<Entry[]> | null = null;
+let listRecentEntriesInFlight: Promise<Entry[]> | null = null;
+// Numbered rubrik sections are small, so we load each one in full (cached per
+// section). The big "all"/"extra" buckets never come through here.
+const sectionEntriesCache = new Map<string, CacheRecord<Entry[]>>();
+const sectionEntriesInFlight = new Map<string, Promise<Entry[]>>();
 
 const entryCacheByDocumentId = new Map<string, CacheRecord<Entry>>();
 const numericIdToDocumentIdCache = new Map<string, CacheRecord<string>>();
@@ -180,7 +202,8 @@ function cacheEntry(entry: Entry) {
 
 function invalidateEntriesListCache() {
   listEntriesCache = null;
-  listEntriesForListCache = null;
+  listRecentEntriesCache = null;
+  sectionEntriesCache.clear();
 }
 
 function toAbsoluteUrl(url: string): string {
@@ -189,10 +212,16 @@ function toAbsoluteUrl(url: string): string {
   }
 
   if (/^https?:\/\//i.test(url)) {
+    // Strip the Strapi origin so the browser fetches via the proxied /uploads/ path,
+    // making media accessible from any host (not just localhost).
+    const strapiOrigin = STRAPI_URL.replace(/\/$/, "");
+    if (url.startsWith(strapiOrigin)) {
+      return url.slice(strapiOrigin.length);
+    }
     return url;
   }
 
-  return `${STRAPI_URL.replace(/\/$/, "")}/${url.replace(/^\//, "")}`;
+  return `/${url.replace(/^\//, "")}`;
 }
 
 function extractStringValue(value: unknown, depth = 0, seen = new Set<unknown>()): string {
@@ -264,6 +293,32 @@ export function normalizeRubrikValue(value: unknown): string {
   return extractStringValue(value).trim().toUpperCase();
 }
 
+function extractAllStringValues(value: unknown, depth = 0, seen = new Set<unknown>()): string[] {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+    if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || trimmed.startsWith("[") || trimmed.startsWith("{")) {
+      try {
+        return extractAllStringValues(JSON.parse(trimmed), depth + 1, seen);
+      } catch {
+        return [trimmed];
+      }
+    }
+    return [trimmed];
+  }
+  if (!value || typeof value !== "object" || seen.has(value) || depth > 5) return [];
+  seen.add(value);
+  if (Array.isArray(value)) {
+    return (value as unknown[]).flatMap((item) => extractAllStringValues(item, depth + 1, seen));
+  }
+  const s = extractStringValue(value, depth, seen);
+  return s ? [s] : [];
+}
+
+export function normalizeRubrikValues(value: unknown): string[] {
+  return extractAllStringValues(value).map((s) => s.trim().toUpperCase()).filter(Boolean);
+}
+
 /**
  * Returns the trimmed string value, or the placeholder when the value is
  * null/undefined/empty.
@@ -289,9 +344,21 @@ export function parseRubrikNumber(value: unknown): number | null {
   return parsed >= 1 && parsed <= 15 ? parsed : null;
 }
 
+function parseSingleRubrikStr(key: string): number | null {
+  const match = key.toLowerCase().match(/^(?:rubrik[-_\s]*)?(?:r)?0*(\d{1,2})$/i);
+  if (!match) return null;
+  const n = Number.parseInt(match[1]!, 10);
+  return n >= 1 && n <= 15 ? n : null;
+}
+
+export function parseRubrikNumbers(value: unknown): number[] {
+  const strs = normalizeRubrikValues(value);
+  return [...new Set(strs.map(parseSingleRubrikStr).filter((n): n is number => n !== null))];
+}
+
 function getHeaders(includeJson = false): HeadersInit {
   const headers: HeadersInit = {};
-  const token = process.env.NEXT_PUBLIC_STRAPI_TOKEN;
+  const token = process.env.STRAPI_TOKEN;
 
   if (token) {
     headers.Authorization = `Bearer ${token}`;
@@ -437,7 +504,7 @@ function normalizeEntry(raw: unknown): Entry {
     title: (source.title as string) ?? "Untitled",
     artNr: source.artNr as string | undefined,
     EAN: source.EAN as string | undefined,
-    rubrik: source.rubrik as string | Record<string, unknown> | undefined,
+    rubrik: source.rubrik as string | string[] | Record<string, unknown> | undefined,
     desc: source.desc as string | undefined,
     tags: normalizeJsonField(source.tags),
     docs: normalizeJsonField(source.docs),
@@ -467,7 +534,13 @@ function toStrapiPayload(payload: EntryPayload) {
     IGS: payload.igs,
     pictures: payload.pictures,
     miscFile: payload.miscFile,
-    rubrik: payload.rubrik,
+    rubrik: (() => {
+      const r = payload.rubrik;
+      if (r == null) return null;
+      if (Array.isArray(r)) return r.length > 0 ? r : null;
+      if (typeof r === "string") return r.trim() ? [r.trim()] : null;
+      return r;
+    })(),
   };
 }
 
@@ -495,6 +568,14 @@ async function parseResponse<T>(res: Response): Promise<T> {
 }
 
 export async function listEntries(): Promise<Entry[]> {
+  // ── Client-side: route through the Next.js API so the token stays on the
+  // server and employee-only fields are stripped before reaching the browser.
+  if (typeof window !== "undefined") {
+    const res = await fetch("/api/entries");
+    if (!res.ok) return [];
+    return (await res.json()) as Entry[];
+  }
+
   if (isCacheFresh(listEntriesCache)) {
     return listEntriesCache.value;
   }
@@ -626,69 +707,45 @@ export async function listEntries(): Promise<Entry[]> {
 }
 
 /**
- * Lightweight variant of listEntries() for the home page.
- * Fetches minimal fields (no pictures/miscFiles) for fast category counts.
+ * Loads only the most-recently-updated entries — the working set most users
+ * actually look at — in a single Strapi request.
+ *
+ * This deliberately does NOT paginate the whole catalogue. The listing page
+ * (/products/all) renders these by default and routes full-text search
+ * through the server search endpoint (searchEntries), which covers every
+ * entry, so nothing becomes unreachable.
+ *
+ * Uses the lighter LIST_FIELDS projection (drops docs/links/issues/tickets/
+ * miscFile) so the RSC payload shipped to each browser stays small.
  */
-export async function listEntriesLight(): Promise<Entry[]> {
-  if (isCacheFresh(listEntriesLightCache)) {
-    return listEntriesLightCache.value;
+export async function listRecentEntries(limit = RECENT_LIMIT): Promise<Entry[]> {
+  if (isCacheFresh(listRecentEntriesCache)) {
+    return listRecentEntriesCache.value;
   }
 
-  if (listEntriesLightInFlight) {
-    return listEntriesLightInFlight;
+  if (listRecentEntriesInFlight) {
+    return listRecentEntriesInFlight;
   }
 
-  listEntriesLightInFlight = (async () => {
-    const allEntries: unknown[] = [];
-
-    const SORT_PARAM = "sort=id:asc";
-    const LIGHT_FIELDS = "fields[0]=id&fields[1]=documentId&fields[2]=title&fields[3]=rubrik&fields[4]=artNr&fields[5]=EAN";
-
-    const firstResponse = await fetch(
-      `${STRAPI_URL}/api/entries?${LIGHT_FIELDS}&${SORT_PARAM}&pagination[pageSize]=500&pagination[page]=1&pagination[withCount]=true`,
-      { headers: getHeaders(), next: { revalidate: 3600 } }
+  listRecentEntriesInFlight = (async () => {
+    // Single request, newest first. sort by updatedAt (most recently touched)
+    // with id as a stable tiebreak.
+    const res = await fetch(
+      `${STRAPI_URL}/api/entries${LIST_FIELDS_QUERY}` +
+        `&sort[0]=updatedAt:desc&sort[1]=id:desc` +
+        `&pagination[pageSize]=${limit}&pagination[page]=1`,
+      { headers: getHeaders(), next: { revalidate: 300 } },
     );
 
-    type LightResponse = {
+    const json = (await res.json()) as {
       data?: unknown[];
-      meta?: { pagination?: { pageCount?: number; pageSize?: number; total?: number } };
       error?: { message?: string };
     };
-
-    const firstJson = (await firstResponse.json()) as LightResponse;
-    if (!firstResponse.ok) {
-      throw new Error(firstJson.error?.message ?? "Failed to fetch entries");
+    if (!res.ok) {
+      throw new Error(json.error?.message ?? "Failed to fetch entries");
     }
 
-    allEntries.push(...(firstJson.data ?? []));
-    const pageCount = firstJson.meta?.pagination?.total
-      ? Math.ceil((firstJson.meta.pagination.total) / 500)
-      : (firstJson.meta?.pagination?.pageCount ?? 1);
-
-    if (pageCount > 1) {
-      const remainingPages = Array.from({ length: pageCount - 1 }, (_, i) => i + 2);
-      const chunkSize = 10;
-
-      for (let i = 0; i < remainingPages.length; i += chunkSize) {
-        const chunk = remainingPages.slice(i, i + chunkSize);
-        const chunkData = await Promise.all(
-          chunk.map(async (page) => {
-            const res = await fetch(
-              `${STRAPI_URL}/api/entries?${LIGHT_FIELDS}&${SORT_PARAM}&pagination[pageSize]=500&pagination[page]=${page}`,
-              { headers: getHeaders(), next: { revalidate: 3600 } }
-            );
-            const json = (await res.json()) as LightResponse;
-            return json.data ?? [];
-          })
-        );
-        for (const pageData of chunkData) {
-          allEntries.push(...pageData);
-        }
-      }
-    }
-
-    const normalized = allEntries.map(normalizeEntry);
-
+    const normalized = (json.data ?? []).map(normalizeEntry);
     const seenDocumentIds = new Set<string>();
     const deduplicated = normalized.filter((entry) => {
       if (seenDocumentIds.has(entry.documentId)) return false;
@@ -696,110 +753,10 @@ export async function listEntriesLight(): Promise<Entry[]> {
       return true;
     });
 
-    listEntriesLightCache = {
+    listRecentEntriesCache = {
       value: deduplicated,
       expiresAt: Date.now() + CACHE_TTL_MS,
     };
-
-    return deduplicated;
-  })();
-
-  try {
-    return await listEntriesLightInFlight;
-  } finally {
-    listEntriesLightInFlight = null;
-  }
-}
-
-/**
- * Optimised list for the /products/all listing page.
- * Fetches the same entries as listEntries() but drops heavy text fields
- * (docs, links, issues, tickets) and the miscFile relation.
- * This reduces the RSC payload sent to each browser by ~40–70 % depending
- * on how much content entries have, while keeping everything the client
- * needs for display, filtering, and search.
- */
-export async function listEntriesForList(): Promise<Entry[]> {
-  if (isCacheFresh(listEntriesForListCache)) {
-    return listEntriesForListCache.value;
-  }
-
-  if (listEntriesForListInFlight) {
-    return listEntriesForListInFlight;
-  }
-
-  type ListResponse<T> = {
-    data?: T;
-    meta?: { pagination?: { pageCount?: number; pageSize?: number; total?: number } };
-    error?: { message?: string; details?: unknown };
-  };
-
-  async function parseListResponse<T>(res: Response): Promise<{
-    data: T;
-    pageCount?: number;
-    pageSize?: number;
-    total?: number;
-  }> {
-    const json = (await res.json()) as ListResponse<T>;
-    if (!res.ok) {
-      const message = json.error?.message ?? "Strapi request failed.";
-      throw new Error(message);
-    }
-    if (json.data === undefined) throw new Error("Unexpected Strapi response shape.");
-    return {
-      data: json.data,
-      pageCount: json.meta?.pagination?.pageCount,
-      pageSize: json.meta?.pagination?.pageSize,
-      total: json.meta?.pagination?.total,
-    };
-  }
-
-  const SORT_PARAM = "&sort=id:asc";
-
-  listEntriesForListInFlight = (async () => {
-    const allEntries: unknown[] = [];
-
-    const firstResponse = await fetch(
-      `${STRAPI_URL}/api/entries${LIST_FIELDS_QUERY}${SORT_PARAM}&pagination[pageSize]=${LIST_PAGE_SIZE}&pagination[page]=1&pagination[withCount]=true`,
-      { headers: getHeaders(), next: { revalidate: 3600 } },
-    );
-
-    const firstPage = await parseListResponse<unknown[]>(firstResponse);
-    allEntries.push(...firstPage.data);
-
-    const effectivePageSize = firstPage.pageSize ?? LIST_PAGE_SIZE;
-    const pageCount =
-      firstPage.total != null
-        ? Math.ceil(firstPage.total / effectivePageSize)
-        : (firstPage.pageCount ?? 1);
-
-    if (pageCount > 1) {
-      const remaining = Array.from({ length: pageCount - 1 }, (_, i) => i + 2);
-      const chunkSize = 6;
-      for (let i = 0; i < remaining.length; i += chunkSize) {
-        const chunk = remaining.slice(i, i + chunkSize);
-        const chunkData = await Promise.all(
-          chunk.map(async (page) => {
-            const res = await fetch(
-              `${STRAPI_URL}/api/entries${LIST_FIELDS_QUERY}${SORT_PARAM}&pagination[pageSize]=${effectivePageSize}&pagination[page]=${page}&pagination[withCount]=true`,
-              { headers: getHeaders(), next: { revalidate: 3600 } },
-            );
-            return (await parseListResponse<unknown[]>(res)).data;
-          }),
-        );
-        for (const pageData of chunkData) allEntries.push(...pageData);
-      }
-    }
-
-    const normalized = allEntries.map(normalizeEntry);
-    const seenDocumentIds = new Set<string>();
-    const deduplicated = normalized.filter((entry) => {
-      if (seenDocumentIds.has(entry.documentId)) return false;
-      seenDocumentIds.add(entry.documentId);
-      return true;
-    });
-
-    listEntriesForListCache = { value: deduplicated, expiresAt: 0 };
 
     for (const entry of deduplicated) {
       cacheEntry(entry);
@@ -809,9 +766,114 @@ export async function listEntriesForList(): Promise<Entry[]> {
   })();
 
   try {
-    return await listEntriesForListInFlight;
+    return await listRecentEntriesInFlight;
   } finally {
-    listEntriesForListInFlight = null;
+    listRecentEntriesInFlight = null;
+  }
+}
+
+/**
+ * Strapi rubrik filter for a browseable section, or `null` for sections that
+ * should fall back to the recent set. Numbered rubriks (R01–R15) and
+ * `replacements` are small enough to load in full; `all` and `extra` (the
+ * ~13k uncategorised bucket) are not, so they return `null` here.
+ */
+function sectionRubrikFilter(section: string): string | null {
+  const m = section.match(/^rubrik-(?:r)?0*(\d{1,2})$/i);
+  if (m) {
+    const n = Number.parseInt(m[1]!, 10);
+    if (n >= 1 && n <= 15) {
+      return `filters[rubrik][$containsi]=R${String(n).padStart(2, "0")}`;
+    }
+  }
+  if (section === "replacements" || section === "replacement") {
+    return `filters[rubrik][$containsi]=replacement`;
+  }
+  return null;
+}
+
+/**
+ * Loads every entry in a single browseable section (numbered rubrik or
+ * replacements) so the listing page shows the whole category, sortable and
+ * fully client-searchable. Sections are small (≤~1100), and Strapi caps
+ * pageSize at 100, so we page through in parallel chunks and cache per section.
+ *
+ * `all` and `extra` are far too large to bulk-load, so they fall back to
+ * listRecentEntries() (newest N) — matching the site-wide "most recent" model.
+ */
+export async function listEntriesBySection(section: string): Promise<Entry[]> {
+  const filter = sectionRubrikFilter(section);
+  if (!filter) {
+    return listRecentEntries();
+  }
+
+  const cached = sectionEntriesCache.get(section);
+  if (isCacheFresh(cached)) {
+    return cached.value;
+  }
+  const inFlight = sectionEntriesInFlight.get(section);
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const fetchPage = async (page: number) => {
+    const res = await fetch(
+      `${STRAPI_URL}/api/entries${LIST_FIELDS_QUERY}` +
+        `&${filter}&sort=id:asc` +
+        `&pagination[pageSize]=100&pagination[page]=${page}&pagination[withCount]=true`,
+      { headers: getHeaders(), next: { revalidate: 300 } },
+    );
+    const json = (await res.json()) as {
+      data?: unknown[];
+      meta?: { pagination?: { pageCount?: number } };
+      error?: { message?: string };
+    };
+    if (!res.ok) {
+      throw new Error(json.error?.message ?? "Failed to fetch entries");
+    }
+    return { data: json.data ?? [], pageCount: json.meta?.pagination?.pageCount ?? 1 };
+  };
+
+  const request = (async () => {
+    const all: unknown[] = [];
+    const first = await fetchPage(1);
+    all.push(...first.data);
+
+    if (first.pageCount > 1) {
+      const rest = Array.from({ length: first.pageCount - 1 }, (_, i) => i + 2);
+      const chunkSize = 6;
+      for (let i = 0; i < rest.length; i += chunkSize) {
+        const results = await Promise.all(
+          rest.slice(i, i + chunkSize).map((p) => fetchPage(p)),
+        );
+        for (const r of results) all.push(...r.data);
+      }
+    }
+
+    const normalized = all.map(normalizeEntry);
+    const seenDocumentIds = new Set<string>();
+    const deduplicated = normalized.filter((entry) => {
+      if (seenDocumentIds.has(entry.documentId)) return false;
+      seenDocumentIds.add(entry.documentId);
+      return true;
+    });
+
+    sectionEntriesCache.set(section, {
+      value: deduplicated,
+      expiresAt: Date.now() + CACHE_TTL_MS,
+    });
+    for (const entry of deduplicated) {
+      cacheEntry(entry);
+    }
+
+    return deduplicated;
+  })();
+
+  sectionEntriesInFlight.set(section, request);
+  try {
+    return await request;
+  } finally {
+    sectionEntriesInFlight.delete(section);
   }
 }
 
@@ -846,15 +908,32 @@ export async function searchEntries(query: string, limit = 24): Promise<Entry[]>
     return inFlight;
   }
 
-  const encoded = encodeURIComponent(trimmed);
+  // Token-based AND-of-ORs: every whitespace-separated token must match at
+  // least one field (title / artNr / EAN / documentId / tags / desc). This lets
+  // multi-word queries match across fields (e.g. "pump 230v" → title contains
+  // "pump" AND artNr contains "230v"), searches tokenized tags, and pushes all
+  // the matching work into Strapi so the entire catalogue is searched without
+  // loading it into memory. A single-token query collapses to the old behaviour.
+  // `desc` is included so numbers embedded in the description — e.g. the
+  // "7753050" in `2"AG (7753050)` — are findable, even though $containsi is a
+  // substring match rather than a whole-word one.
+  const SEARCH_FIELDS = ["title", "artNr", "EAN", "documentId", "tags", "desc"] as const;
+  const tokens = trimmed.split(/\s+/).filter(Boolean).slice(0, 8);
+  const filterQuery = tokens
+    .flatMap((token, ti) => {
+      const enc = encodeURIComponent(token);
+      return SEARCH_FIELDS.map(
+        (field, fi) =>
+          `filters[$and][${ti}][$or][${fi}][${field}][$containsi]=${enc}`,
+      );
+    })
+    .join("&");
+
   const request = (async () => {
     const res = await fetch(
       `${STRAPI_URL}/api/entries${POPULATE_QUERY}` +
         `&pagination[pageSize]=${safeLimit}` +
-        `&filters[$or][0][title][$containsi]=${encoded}` +
-        `&filters[$or][1][artNr][$containsi]=${encoded}` +
-        `&filters[$or][2][EAN][$containsi]=${encoded}` +
-        `&filters[$or][3][documentId][$containsi]=${encoded}`,
+        `&${filterQuery}`,
       {
         headers: getHeaders(),
         cache: "no-store",
@@ -1003,6 +1082,75 @@ export async function getEntryById(id: string): Promise<Entry | null> {
   }
 }
 
+/**
+ * Loads the entries whose artNr sits immediately before and after the given
+ * artNr in lexicographic (dictionary) order. Because a base article's variants
+ * are formed by appending digits — "04305" → "043051", "043052" — the base
+ * sorts right before its variants, so this window naturally shows an item
+ * together with its replacement parts / versions.
+ *
+ * `count` items are returned on each side. The `before` list is ordered so it
+ * reads top-to-bottom toward the current entry (i.e. closest-last).
+ */
+export async function getArtNrNeighbors(artNr: string, count: number): Promise<EntryNeighbors> {
+  const trimmed = artNr.trim();
+  if (!trimmed) {
+    return { before: [], after: [] };
+  }
+
+  const safeCount = Math.max(1, Math.min(count, 50));
+
+  // ── Client-side: route through the Next.js API so the Strapi token stays on
+  // the server (mirrors searchEntries / getEntryById).
+  if (typeof window !== "undefined") {
+    const params = new URLSearchParams({ artNr: trimmed, count: String(safeCount) });
+    const res = await fetch(`/api/entries/neighbors?${params.toString()}`);
+    if (!res.ok) return { before: [], after: [] };
+    return (await res.json()) as EntryNeighbors;
+  }
+
+  // ── Server-side: one Strapi request per direction. `$gt`/`$lt` on the artNr
+  // string column give the dictionary-order neighbours.
+  const fetchDirection = async (direction: "before" | "after"): Promise<Entry[]> => {
+    const op = direction === "after" ? "$gt" : "$lt";
+    const order = direction === "after" ? "asc" : "desc";
+    const res = await fetch(
+      `${STRAPI_URL}/api/entries${NEIGHBOR_FIELDS_QUERY}` +
+        `&filters[artNr][${op}]=${encodeURIComponent(trimmed)}` +
+        `&sort=artNr:${order}` +
+        `&pagination[pageSize]=${safeCount}&pagination[page]=1`,
+      { headers: getHeaders(), cache: "no-store" },
+    );
+
+    const json = (await res.json()) as {
+      data?: unknown[];
+      error?: { message?: string };
+    };
+    if (!res.ok) {
+      throw new Error(json.error?.message ?? "Failed to fetch neighbours");
+    }
+
+    const normalized = (json.data ?? []).map(normalizeEntry);
+    const seen = new Set<string>();
+    return normalized.filter((entry) => {
+      if (seen.has(entry.documentId)) return false;
+      seen.add(entry.documentId);
+      return true;
+    });
+  };
+
+  const [before, after] = await Promise.all([
+    fetchDirection("before"),
+    fetchDirection("after"),
+  ]);
+
+  // `before` came back descending (closest artNr first); reverse it so the list
+  // ascends toward the current entry.
+  before.reverse();
+
+  return { before, after };
+}
+
 export async function createEntry(payload: EntryPayload): Promise<Entry> {
   const strapiPayload = toStrapiPayload(payload);
   const requestBody = { data: strapiPayload };
@@ -1030,7 +1178,10 @@ export async function updateEntry(id: string, payload: EntryPayload): Promise<En
   const strapiPayload = toStrapiPayload(payload);
   const requestBody = { data: strapiPayload };
 
-  const res = await fetch(`${STRAPI_URL}/api/entries/${documentId}`, {
+  // Populate media on the response so callers get the full entry back (with
+  // pictures/miscFiles) instead of an unpopulated shell that looks like the
+  // images were removed.
+  const res = await fetch(`${STRAPI_URL}/api/entries/${documentId}${POPULATE_QUERY}`, {
     method: "PUT",
     headers: getHeaders(true),
     body: JSON.stringify(requestBody),
@@ -1043,33 +1194,124 @@ export async function updateEntry(id: string, payload: EntryPayload): Promise<En
   return normalized;
 }
 
+/**
+ * Server-side content dedup: return the id of an existing media file whose
+ * bytes are identical to `file`, or null. Prefilters by original name + size
+ * (cheap) then verifies with a sha256 of the actual content, so we never reuse
+ * a coincidental name/size match. Identical assets used to be re-uploaded once
+ * per entry, bloating the library ~3x — this collapses them to one record.
+ */
+async function findExistingMedia(file: File): Promise<number | null> {
+  try {
+    const sizeKb = Math.round((file.size / 1000) * 100) / 100;
+    const url =
+      `${STRAPI_URL}/api/upload/files` +
+      `?filters[name][$eq]=${encodeURIComponent(file.name)}` +
+      `&sort=id:asc&pagination[pageSize]=100`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${process.env.STRAPI_TOKEN}` },
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const list = (await res.json()) as Array<{ id: number; name: string; size: number; url: string }>;
+    const candidates = (Array.isArray(list) ? list : []).filter(
+      (f) => f.name === file.name && Math.abs((f.size ?? 0) - sizeKb) < 0.02,
+    );
+    if (candidates.length === 0) return null;
+
+    const { createHash } = await import("node:crypto");
+    const wantHash = createHash("sha256").update(Buffer.from(await file.arrayBuffer())).digest("hex");
+    for (const f of candidates) {
+      try {
+        const fres = await fetch(`${STRAPI_URL}${f.url}`, {
+          headers: { Authorization: `Bearer ${process.env.STRAPI_TOKEN}` },
+          cache: "no-store",
+        });
+        if (!fres.ok) continue;
+        const gotHash = createHash("sha256").update(Buffer.from(await fres.arrayBuffer())).digest("hex");
+        if (gotHash === wantHash) return f.id;
+      } catch {
+        /* ignore and try the next candidate */
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export async function uploadMedia(files: File[]): Promise<number[]> {
   const formData = new FormData();
   files.forEach((file) => {
     formData.append("files", file);
   });
 
-  const res = await fetch(`${STRAPI_URL}/api/upload`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env.NEXT_PUBLIC_STRAPI_TOKEN}`,
-    },
-    body: formData,
-  });
-
-  if (!res.ok) {
-    const error = await res.json();
-    console.error("Media upload error:", error);
-    throw new Error("Failed to upload media.");
+  // ── Client-side: route through the editor-gated /api/media route so the
+  // token stays on the server and only authorised users can upload.
+  if (typeof window !== "undefined") {
+    const res = await fetch("/api/media", { method: "POST", body: formData });
+    if (!res.ok) {
+      const data = (await res.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(data?.error ?? "Failed to upload media.");
+    }
+    const data = (await res.json()) as { ids: number[] };
+    return Array.isArray(data.ids) ? data.ids : [];
   }
 
-  const data = (await res.json()) as Array<{ id: number }>;
-  return data.map((item) => item.id);
+  // ── Server-side: upload straight to Strapi with the server-only token.
+  // Reuse existing records for byte-identical content instead of creating
+  // duplicates; only genuinely new files are uploaded. Order is preserved.
+  const results: number[] = new Array(files.length);
+  const pending: { index: number; file: File }[] = [];
+
+  await Promise.all(
+    files.map(async (file, i) => {
+      const existing = await findExistingMedia(file);
+      if (existing != null) results[i] = existing;
+      else pending.push({ index: i, file });
+    }),
+  );
+
+  if (pending.length > 0) {
+    const uploadForm = new FormData();
+    pending.forEach(({ file }) => uploadForm.append("files", file));
+
+    const res = await fetch(`${STRAPI_URL}/api/upload`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.STRAPI_TOKEN}`,
+      },
+      body: uploadForm,
+    });
+
+    if (!res.ok) {
+      const error = await res.json();
+      console.error("Media upload error:", error);
+      throw new Error("Failed to upload media.");
+    }
+
+    const data = (await res.json()) as Array<{ id: number }>;
+    if (!Array.isArray(data) || data.length !== pending.length) {
+      throw new Error("Unexpected upload response from Strapi.");
+    }
+    pending.forEach(({ index }, k) => {
+      results[index] = data[k].id;
+    });
+  }
+
+  return results;
 }
 
 export async function getMediaById(id: number): Promise<EntryMedia | null> {
   if (!Number.isFinite(id) || id <= 0) {
     return null;
+  }
+
+  // ── Client-side: route through the Next.js API (token stays on the server).
+  if (typeof window !== "undefined") {
+    const res = await fetch(`/api/media/${id}`);
+    if (!res.ok) return null;
+    return (await res.json()) as EntryMedia | null;
   }
 
   const cached = mediaCacheById.get(id);

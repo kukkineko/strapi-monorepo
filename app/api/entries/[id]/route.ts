@@ -4,11 +4,12 @@ import type { Entry, EntryPayload } from "@/app/lib/entries";
 import {
   getSessionJwt,
   loadUserContext,
-  saveUserSchemaData,
+  updateMe,
 } from "@/app/lib/auth-server";
 import {
   appendAuditLog,
   buildAuditDetails,
+  snapshotForSection,
   type AuditAction,
   type AuditLogEntry,
 } from "@/app/lib/audit-log";
@@ -42,23 +43,19 @@ export async function GET(
     return NextResponse.json(null, { status: 400 });
   }
 
+  const jwt = await getSessionJwt();
+  if (!jwt) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+  const context = await loadUserContext(jwt);
+  if (!context?.user) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+  if (context.user.blocked) return NextResponse.json({ error: "Your account has been suspended." }, { status: 403 });
+
   const entry = await getEntryById(id);
 
   if (!entry) {
     return NextResponse.json(null, { status: 404 });
   }
 
-  let isEmployee = false;
-  try {
-    const jwt = await getSessionJwt();
-    if (jwt) {
-      const ctx = await loadUserContext(jwt);
-      isEmployee = ctx?.user?.employee === true;
-    }
-  } catch {
-    isEmployee = false;
-  }
-
+  const isEmployee = context.user.employee === true;
   const safeEntry = isEmployee ? entry : stripEmployeeFields(entry);
 
   return NextResponse.json(safeEntry, {
@@ -102,7 +99,13 @@ export async function PUT(
     );
   }
 
-  /* ── Trusted check ──────────────────────────────────────────────────────── */
+  /* ── Trusted + not-blocked check ───────────────────────────────────────── */
+  if (context.user.blocked) {
+    return NextResponse.json(
+      { error: "Your account has been suspended." },
+      { status: 403 },
+    );
+  }
   if (!context.user.trusted) {
     return NextResponse.json(
       {
@@ -130,11 +133,14 @@ export async function PUT(
     // Strip metadata fields before forwarding to Strapi.
     const { _auditSection, _auditAction, ...payload } = body;
 
+    // Capture the before-state for this section before writing.
+    const section = _auditSection || "entry";
+    const before = await getEntryById(id);
+
     const updated = await updateEntry(id, payload);
 
     /* ── Audit log ────────────────────────────────────────────────────────── */
-    if (context.schema) {
-      const section = _auditSection || "entry";
+    {
       const action: AuditAction = _auditAction || "update";
 
       const logEntry: AuditLogEntry = {
@@ -144,10 +150,11 @@ export async function PUT(
         entryTitle: updated.title,
         section,
         details: buildAuditDetails(action, section, updated.title),
+        snapshot: before ? { before: snapshotForSection(before, section) } : undefined,
       };
 
-      const nextData = appendAuditLog(context.schema.data, logEntry);
-      await saveUserSchemaData(context.schema.path, { data: nextData });
+      const nextLog = appendAuditLog(context.user.auditLog, logEntry);
+      await updateMe(jwt, { auditLog: nextLog });
     }
 
     /* Strip employee-only fields for non-employees. */
@@ -156,6 +163,7 @@ export async function PUT(
 
     return NextResponse.json(safeEntry);
   } catch (err) {
+    console.error("[PUT /api/entries/:id]", err);
     const message =
       err instanceof Error ? err.message : "Failed to update entry.";
     return NextResponse.json({ error: message }, { status: 500 });
@@ -219,12 +227,9 @@ export async function DELETE(
   /* ── Delete from Strapi ─────────────────────────────────────────────────── */
   try {
     const STRAPI_URL = (
-      process.env.NEXT_PUBLIC_STRAPI_URL ?? "http://localhost:1337"
+      process.env.STRAPI_URL ?? "http://localhost:1337"
     ).replace(/\/$/, "");
-    const token =
-      process.env.STRAPI_TOKEN ??
-      process.env.NEXT_PUBLIC_STRAPI_TOKEN ??
-      "";
+    const token = process.env.STRAPI_TOKEN ?? "";
 
     const res = await fetch(
       `${STRAPI_URL}/api/entries/${entry.documentId}`,
@@ -247,7 +252,7 @@ export async function DELETE(
     }
 
     /* ── Audit log ────────────────────────────────────────────────────────── */
-    if (context.schema) {
+    {
       const logEntry: AuditLogEntry = {
         action: "delete",
         timestamp: new Date().toISOString(),
@@ -255,10 +260,27 @@ export async function DELETE(
         entryTitle: entry.title,
         section: "entry",
         details: buildAuditDetails("delete", "entry", entry.title),
+        // Store all text fields so the entry can be recreated on undo.
+        // Media (pictures, files) cannot be restored and must be re-uploaded.
+        snapshot: {
+          before: {
+            title: entry.title,
+            artNr: entry.artNr,
+            EAN: entry.EAN,
+            desc: entry.desc,
+            rubrik: entry.rubrik as string | Record<string, unknown> | undefined,
+            tags: entry.tags,
+            docs: entry.docs,
+            links: entry.links,
+            issues: entry.issues,
+            tickets: entry.tickets,
+            igs: entry.igs,
+          },
+        },
       };
 
-      const nextData = appendAuditLog(context.schema.data, logEntry);
-      await saveUserSchemaData(context.schema.path, { data: nextData });
+      const nextLog = appendAuditLog(context.user.auditLog, logEntry);
+      await updateMe(jwt, { auditLog: nextLog });
     }
 
     return NextResponse.json({ ok: true });

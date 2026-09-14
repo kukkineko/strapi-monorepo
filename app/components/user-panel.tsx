@@ -10,14 +10,15 @@ import {
   type AuthUser,
 } from "@/app/lib/auth-types";
 import { getEntryById, type Entry } from "@/app/lib/entries";
+import { useProjects } from "@/app/lib/lists";
 import {
   AdminPanelContent,
   AuditLogContent,
   DBBackupContent,
   DBStatsContent,
-  ImportDataContent,
   LinkConfidenceContent,
   AssignDocsContent,
+  ServerContent,
 } from "@/app/components/admin-panel";
 
 /* ─── avatar helpers ─────────────────────────────────────────────────────── */
@@ -52,7 +53,7 @@ function getUserInitials(user: AuthUser): string {
 
 /* ─── types ──────────────────────────────────────────────────────────────── */
 
-type Tab = "profile" | "favourites" | "admin";
+type Tab = "profile" | "favourites" | "lists" | "admin";
 
 /* ─── ProfileTab ─────────────────────────────────────────────────────────── */
 
@@ -260,12 +261,98 @@ function FavouritesTab() {
   );
 }
 
+/* ─── ListsTab ───────────────────────────────────────────────────────────── */
+/*                                                                            */
+/* Read-only view of the user's "Liste erstellen" projects. Data comes from   */
+/* the shared store (server-synced + localStorage cache); full editing —       */
+/* positions, amounts, add/remove — lives on the /listen page.                */
+
+function ListsTab({ onClose }: { onClose: () => void }) {
+  const projects = useProjects();
+
+  if (projects.length === 0) {
+    return (
+      <div className="wiki-user-lists-empty">
+        <p className="wiki-user-panel-empty">
+          No lists yet. Create a project and add articles to it.
+        </p>
+        <Link href="/listen" className="wiki-button primary" onClick={onClose}>
+          Open Lists
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <div className="wiki-user-lists">
+      <div className="wiki-user-lists-head">
+        <span className="wiki-muted">
+          {projects.length} {projects.length === 1 ? "project" : "projects"}
+        </span>
+        <Link href="/listen" className="wiki-button small" onClick={onClose}>
+          Open full editor
+        </Link>
+      </div>
+
+      {projects.map((project) => {
+        const items = [...project.items].sort((a, b) => a.position - b.position);
+        const totalAmount = items.reduce((sum, i) => sum + i.amount, 0);
+        return (
+          <section key={project.id} className="wiki-user-list-card">
+            <div className="wiki-user-list-card-head">
+              <strong>{project.name}</strong>
+              <span className="wiki-muted">
+                {items.length} {items.length === 1 ? "article" : "articles"}
+                {items.length > 0 && ` · ${totalAmount} total`}
+              </span>
+            </div>
+
+            {items.length === 0 ? (
+              <p className="wiki-muted wiki-user-list-empty-row">No articles yet.</p>
+            ) : (
+              <div className="wiki-list-table-scroll">
+                <table className="wiki-list-table">
+                  <thead>
+                    <tr>
+                      <th className="wiki-list-cell-pos">Pos.</th>
+                      <th className="wiki-list-cell-article">Article</th>
+                      <th className="wiki-list-cell-amount">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map((item) => (
+                      <tr key={item.entryId}>
+                        <td className="wiki-list-cell-pos">{item.position}</td>
+                        <td className="wiki-list-cell-article">
+                          <Link
+                            href={`/products/${item.entryId}?from=/listen`}
+                            className="wiki-list-article-link"
+                            onClick={onClose}
+                          >
+                            <strong>{item.title}</strong>
+                            {item.artNr && <span className="wiki-muted"> · {item.artNr}</span>}
+                          </Link>
+                        </td>
+                        <td className="wiki-list-cell-amount">{item.amount}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
 /* ─── AdminTab ───────────────────────────────────────────────────────────── */
 
-type AdminView = null | "users" | "db" | "stats" | "audit" | "import" | "confidence" | "assigndocs";
+type AdminView = null | "users" | "db" | "stats" | "audit" | "confidence" | "assigndocs" | "server";
 
 const ADMIN_SECTIONS: Array<{
-  id:     "users" | "db" | "stats" | "audit" | "import" | "confidence" | "assigndocs";
+  id:     "users" | "db" | "stats" | "audit" | "confidence" | "assigndocs" | "server";
   icon:   string;
   title:  string;
   desc:   string;
@@ -310,15 +397,6 @@ const ADMIN_SECTIONS: Array<{
     border: "#a5f3fc",
   },
   {
-    id:     "import",
-    icon:   "📥",
-    title:  "Import Data",
-    desc:   "Upload documents to AI and link replacement parts",
-    color:  "#059669",
-    bg:     "#ecfdf5",
-    border: "#a7f3d0",
-  },
-  {
     id:     "confidence",
     icon:   "🔗",
     title:  "Link Confidence",
@@ -335,6 +413,15 @@ const ADMIN_SECTIONS: Array<{
     color:  "#0369a1",
     bg:     "#f0f9ff",
     border: "#bae6fd",
+  },
+  {
+    id:     "server",
+    icon:   "🔄",
+    title:  "Server",
+    desc:   "Build and restart the production server",
+    color:  "#b91c1c",
+    bg:     "#fff1f2",
+    border: "#fecdd3",
   },
 ];
 
@@ -396,10 +483,10 @@ function AdminTab({ onClose }: { onClose: () => void }) {
       {view === "users"      && <AdminPanelContent />}
       {view === "audit"      && <AuditLogContent />}
       {view === "db"         && <DBBackupContent />}
-      {view === "stats"      && <DBStatsContent />}
-      {view === "import"     && <ImportDataContent />}
+      {view === "stats"      && <DBStatsContent onClose={onClose} />}
       {view === "confidence" && <LinkConfidenceContent />}
       {view === "assigndocs" && <AssignDocsContent />}
+      {view === "server"     && <ServerContent />}
     </div>
   );
 }
@@ -456,8 +543,8 @@ export function UserPanel({
   }, []);
 
   /* Close on Escape key — but NEVER while the admin tab is active.
-     Admin import work is easy to lose accidentally and is persisted to
-     localStorage anyway; we'd rather force the explicit × click. */
+     Admin work in progress is easy to lose accidentally; we'd rather
+     force the explicit × click. */
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape" && tab !== "admin") onClose();
@@ -474,10 +561,8 @@ export function UserPanel({
 
   const avatarColor   = getAvatarColor(user);
   const initials      = getUserInitials(user);
-  const displayedName =
-    formatDisplayName(user.name) ||
-    displayUsername(user.username) ||
-    user.email.split("@")[0];
+  const username      = displayUsername(user.username) || user.email.split("@")[0];
+  const fullName      = formatDisplayName(user.name);
   const company = displayCompany(user.company);
 
   const panel = (
@@ -537,11 +622,14 @@ export function UserPanel({
             >
               {initials}
             </div>
-            {/* Name / email / company */}
+            {/* Username / full name / email / company */}
             <div style={{ display: "grid", gap: "0.1rem", minWidth: 0 }}>
               <strong style={{ fontSize: "0.96rem", fontWeight: 800, color: "#0f172a" }}>
-                {displayedName}
+                {username}
               </strong>
+              {fullName && (
+                <span style={{ fontSize: "0.82rem", fontWeight: 600, color: "#475569" }}>{fullName}</span>
+              )}
               <span style={{ fontSize: "0.78rem", color: "#64748b" }}>{user.email}</span>
               {company && (
                 <span style={{ fontSize: "0.72rem", color: "#94a3b8" }}>{company}</span>
@@ -576,6 +664,14 @@ export function UserPanel({
           >
             Favourites
           </button>
+          <button
+            type="button" role="tab"
+            aria-selected={tab === "lists"}
+            className={`wiki-user-panel-tab-btn${tab === "lists" ? " active" : ""}`}
+            onClick={() => setTab("lists")}
+          >
+            Lists
+          </button>
           {user.administrator && (
             <button
               type="button" role="tab"
@@ -592,6 +688,7 @@ export function UserPanel({
         <div className="wiki-user-panel-body">
           {tab === "profile"    && <ProfileTab user={user} onLogout={onLogout} />}
           {tab === "favourites" && <FavouritesTab />}
+          {tab === "lists"      && <ListsTab onClose={onClose} />}
           {tab === "admin"      && user.administrator && <AdminTab onClose={onClose} />}
         </div>
       </div>

@@ -6,7 +6,7 @@ export const TOPBAR_ICON_ALL = "/icons/options-svgrepo-com.svg";
 export const TOPBAR_ICON_FALLBACK = "/icons/options-svgrepo-com.svg";
 export const TOPBAR_ICON_LOGIN = "/icons/options-svgrepo-com.svg";
 export const SECTION_ADD_ICON = "/icons/add-ellipse-svgrepo-com.svg";
-export const SECTION_ADD_ICON_SIZE = 25;
+export const SECTION_ADD_ICON_SIZE = 18;
 export const SECTION_ADD_ICON_OFFSET_Y = 0;
 
 // Per-SVG size control (px). Tune each icon independently.

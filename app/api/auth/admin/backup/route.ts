@@ -1,8 +1,13 @@
 import { NextResponse } from "next/server";
-import { getSessionJwt, loadUserContext } from "@/app/lib/auth-server";
+import {
+  getSessionJwt,
+  loadUserContext,
+  adminExportUsers,
+  adminImportUsers,
+} from "@/app/lib/auth-server";
 
-const STRAPI_BASE_URL = (process.env.NEXT_PUBLIC_STRAPI_URL ?? "http://localhost:1337").replace(/\/$/, "");
-const STRAPI_API_TOKEN = process.env.STRAPI_TOKEN ?? process.env.NEXT_PUBLIC_STRAPI_TOKEN ?? "";
+const STRAPI_BASE_URL = (process.env.STRAPI_URL ?? "http://localhost:1337").replace(/\/$/, "");
+const STRAPI_API_TOKEN = process.env.STRAPI_TOKEN ?? "";
 
 const PAGE_SIZE = 100;
 
@@ -20,6 +25,8 @@ type BackupPayload = {
   backupVersion?: number;
   collections?: {
     entries?: Array<Record<string, unknown>>;
+    appusers?: Array<Record<string, unknown>>;
+    /** Legacy key from backupVersion 1 backups. */
     customusers?: Array<Record<string, unknown>>;
   };
 };
@@ -104,31 +111,6 @@ function sanitizeEntryPayload(raw: Record<string, unknown>): Record<string, unkn
   return payload;
 }
 
-function sanitizeUserPayload(raw: Record<string, unknown>): Record<string, unknown> {
-  const source = normalizeRecord(raw);
-
-  const payload: Record<string, unknown> = {
-    email: parseText(source.email),
-  };
-
-  const directKeys = ["userID", "name", "username", "company", "data"];
-  for (const key of directKeys) {
-    const value = source[key];
-    if (value !== undefined) {
-      payload[key] = value;
-    }
-  }
-
-  const boolKeys = ["confirmed", "trusted", "blocked", "employee", "administrator"];
-  for (const key of boolKeys) {
-    if (source[key] !== undefined) {
-      payload[key] = Boolean(source[key]);
-    }
-  }
-
-  return payload;
-}
-
 async function fetchCollectionPage<T>(
   path: string,
   page: number,
@@ -189,19 +171,19 @@ export async function GET() {
   }
 
   try {
-    const [entries, customusers] = await Promise.all([
+    const [entries, appusers] = await Promise.all([
       fetchAllCollection<Record<string, unknown>>("/api/entries?populate=*"),
-      fetchAllCollection<Record<string, unknown>>("/api/customusers?populate=*&sort[0]=email:asc"),
+      adminExportUsers(jwt),
     ]);
 
     const createdAt = new Date();
     const backup = {
-      backupVersion: 1,
+      backupVersion: 2,
       createdAt: createdAt.toISOString(),
       source: STRAPI_BASE_URL,
       collections: {
         entries,
-        customusers,
+        appusers,
       },
     };
 
@@ -243,29 +225,22 @@ export async function POST(request: Request) {
   }
 
   const importEntries = Array.isArray(backup.collections.entries) ? backup.collections.entries : [];
-  const importUsers = Array.isArray(backup.collections.customusers) ? backup.collections.customusers : [];
+  const importUsers = Array.isArray(backup.collections.appusers)
+    ? backup.collections.appusers
+    : Array.isArray(backup.collections.customusers)
+      ? backup.collections.customusers
+      : [];
 
   try {
-    const [existingEntries, existingUsers] = await Promise.all([
-      fetchAllCollection<Record<string, unknown>>("/api/entries?fields[0]=documentId&fields[1]=title"),
-      fetchAllCollection<Record<string, unknown>>("/api/customusers?fields[0]=documentId&fields[1]=email"),
-    ]);
+    const existingEntries = await fetchAllCollection<Record<string, unknown>>(
+      "/api/entries?fields[0]=documentId&fields[1]=title",
+    );
 
     const entryDocIds = new Set(
       existingEntries
         .map((entry) => parseText(normalizeRecord(entry).documentId))
         .filter(Boolean)
     );
-
-    const userByEmail = new Map<string, string>();
-    for (const user of existingUsers) {
-      const normalized = normalizeRecord(user);
-      const email = parseText(normalized.email).toLowerCase();
-      const documentId = parseText(normalized.documentId);
-      if (email && documentId) {
-        userByEmail.set(email, documentId);
-      }
-    }
 
     let entriesCreated = 0;
     let entriesUpdated = 0;
@@ -321,53 +296,12 @@ export async function POST(request: Request) {
       }
     }
 
-    for (const userRaw of importUsers) {
-      const normalized = normalizeRecord(userRaw);
-      const payload = sanitizeUserPayload(normalized);
-      const email = parseText(payload.email).toLowerCase();
-
-      if (!email) {
-        usersSkipped += 1;
-        continue;
-      }
-
-      const existingDocId = userByEmail.get(email);
-      if (existingDocId) {
-        const updateRes = await fetch(`${STRAPI_BASE_URL}/api/customusers/${existingDocId}`, {
-          method: "PUT",
-          headers: {
-            Authorization: `Bearer ${STRAPI_API_TOKEN}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ data: payload }),
-          cache: "no-store",
-        });
-
-        if (updateRes.ok) {
-          usersUpdated += 1;
-        } else {
-          usersSkipped += 1;
-        }
-
-        continue;
-      }
-
-      const createRes = await fetch(`${STRAPI_BASE_URL}/api/customusers`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${STRAPI_API_TOKEN}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ data: payload }),
-        cache: "no-store",
-      });
-
-      if (createRes.ok) {
-        usersCreated += 1;
-      } else {
-        usersSkipped += 1;
-      }
-    }
+    // Users are upserted by email (password hashes preserved) via the
+    // administrator-only /api/app-auth/import endpoint.
+    const userReport = await adminImportUsers(jwt, importUsers as Record<string, unknown>[]);
+    usersCreated = userReport.created;
+    usersUpdated = userReport.updated;
+    usersSkipped = userReport.skipped;
 
     return NextResponse.json({
       ok: true,

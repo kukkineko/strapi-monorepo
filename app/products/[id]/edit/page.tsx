@@ -667,7 +667,7 @@ export default function EditProductPage() {
   if (authLoading) {
     return (
       <main className="wiki-shell">
-        <TopBar actions={[{ href: entryId ? `/products/${entryId}` : "/", label: t.nav.back }]} />
+        <TopBar actions={[{ href: entryId ? `/products/${entryId}` : "/", label: t.nav.back, isBack: true }]} />
         <section className="wiki-card">
           <p className="wiki-muted">Loading...</p>
         </section>
@@ -679,7 +679,7 @@ export default function EditProductPage() {
   if (!isTrusted) {
     return (
       <main className="wiki-shell">
-        <TopBar actions={[{ href: entryId ? `/products/${entryId}` : "/", label: t.nav.back }]} />
+        <TopBar actions={[{ href: entryId ? `/products/${entryId}` : "/", label: t.nav.back, isBack: true }]} />
         <section className="wiki-card">
           <h1>Edit Product Page</h1>
           <p className="wiki-error">
@@ -695,7 +695,7 @@ export default function EditProductPage() {
   return (
     <main className="wiki-shell">
       <TopBar
-        actions={[{ href: entryId ? `/products/${entryId}` : "/", label: t.nav.back }]}
+        actions={[{ href: entryId ? `/products/${entryId}` : "/", label: t.nav.back, isBack: true }]}
       />
 
       <section className="wiki-card">

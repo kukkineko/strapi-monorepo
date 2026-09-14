@@ -1,15 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { FormEvent, useState } from "react";
 import { Suspense } from "react";
+import { useRouter } from "next/navigation";
 import { TopBar } from "@/app/components/top-bar";
 import { useLanguage } from "@/app/components/language-provider";
-
-export type GroupedCounts = {
-  rubrikenCounts: Record<number, number>;
-  replacementsCount: number;
-  extraCount: number;
-};
 
 const RUBRIK_NAMES: Record<number, string> = {
   1: "Gegenschwimm-, Massage- und Luftsprudelanlagen",
@@ -37,66 +33,83 @@ function rubrikLabel(rubrikNumber: number): string {
   return `R${String(rubrikNumber).padStart(2, "0")}`;
 }
 
-export function HomePageClient({ grouped }: { grouped: GroupedCounts }) {
-  const { t } = useLanguage();
+export function HomePageClient() {
+  const { t }  = useLanguage();
+  const router = useRouter();
+  const [query, setQuery] = useState("");
+
+  function handleSearch(e: FormEvent) {
+    e.preventDefault();
+    const q = query.trim();
+    const url = q
+      ? `/products/all?q=${encodeURIComponent(q)}&sort=artnr&section=all`
+      : "/products/all";
+    void router.push(url);
+  }
 
   return (
     <main className="wiki-shell">
       <Suspense fallback={null}>
         <TopBar
           actions={[
-            { href: "/products/new", label: t.nav.createNewPage, primary: true },
+            { href: "/products/new", label: t.nav.createNewPage, primary: true, adminOnly: true },
             { href: "/products/all", label: t.nav.allProducts },
+            { href: "/listen", label: t.nav.lists },
           ]}
         />
       </Suspense>
 
       <header className="wiki-header">
-        <h1>{t.home.title}</h1>
-        <p>{t.home.subtitle}</p>
+        <div className="wiki-title-row">
+          <h1>{t.home.title}</h1>
+          <p>{t.home.subtitle}</p>
+        </div>
       </header>
 
-      <section className="wiki-card">
-        <h2>{t.home.groupedPagesTitle}</h2>
-        <p className="wiki-muted">{t.home.groupedPagesSubtitle}</p>
+      <section className="wiki-card wiki-home-card">
+        {/* ── Hero search bar ── */}
+        <form onSubmit={handleSearch} className="wiki-home-search">
+          <input
+            type="search"
+            className="wiki-home-search-input"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t.home.globalSearchPlaceholder}
+            aria-label={t.home.globalSearchLabel}
+            autoComplete="off"
+          />
+          <button type="submit" className="wiki-home-search-btn" aria-label={t.home.globalSearchLabel}>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" strokeWidth="2.2" />
+              <path d="M16.65 16.65L21 21" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+            </svg>
+          </button>
+        </form>
+
+        <div className="wiki-home-divider" />
+
+        <p className="wiki-home-section-label">{t.home.groupedPagesTitle}</p>
 
         <div className="wiki-square-grid">
+          {Array.from({ length: 15 }, (_, i) => i + 1).map((rubrikNumber) => (
+            <Link
+              key={rubrikNumber}
+              href={`/products/all?section=${rubrikSectionValue(rubrikNumber)}`}
+              className="wiki-square-button"
+            >
+              <h3>{rubrikLabel(rubrikNumber)}</h3>
+              <span className="wiki-square-button-name">{RUBRIK_NAMES[rubrikNumber]}</span>
+            </Link>
+          ))}
 
-          {/* ── All items ── */}
-          <Link href="/products/all" className="wiki-square-button wiki-square-button--all">
-            <div className="wiki-square-button--all-label">
-              <h3>{t.listing.allSections}</h3>
-              <span>{t.home.groupedPagesTitle}</span>
-            </div>
-          </Link>
-
-          {/* ── R01 – R15 ── */}
-          {Array.from({ length: 15 }, (_, index) => index + 1).map((rubrikNumber) => {
-            const count = grouped.rubrikenCounts[rubrikNumber] ?? 0;
-            return (
-              <Link
-                key={rubrikNumber}
-                href={`/products/all?section=${rubrikSectionValue(rubrikNumber)}`}
-                className="wiki-square-button"
-              >
-                <h3>{rubrikLabel(rubrikNumber)}</h3>
-                <span className="wiki-square-button-name">
-                  {RUBRIK_NAMES[rubrikNumber]}
-                </span>
-              </Link>
-            );
-          })}
-
-          {/* ── Replacements ── */}
           <Link href="/products/all?section=replacements" className="wiki-square-button">
             <h3>{t.home.replacements}</h3>
           </Link>
 
-          {/* ── Extra ── */}
-          <Link href="/products/all?section=extra" className="wiki-square-button">
+          <Link href="/products/all?section=extra" className="wiki-square-button wiki-square-button--extra">
             <h3>{t.home.extra}</h3>
+            <span className="wiki-square-button-name">{t.home.extraDesc}</span>
           </Link>
-
         </div>
       </section>
     </main>

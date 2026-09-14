@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { cacheLife, cacheTag } from "next/cache";
-import { getSessionJwt, loadUserContext } from "@/app/lib/auth-server";
+import { getSessionJwt, loadUserContext, adminListUsers } from "@/app/lib/auth-server";
 
 type StrapiListResponse<T> = {
   data?: T[];
@@ -14,8 +14,8 @@ type StrapiListResponse<T> = {
   };
 };
 
-const STRAPI_BASE_URL = (process.env.NEXT_PUBLIC_STRAPI_URL ?? "http://localhost:1337").replace(/\/$/, "");
-const STRAPI_API_TOKEN = process.env.STRAPI_TOKEN ?? process.env.NEXT_PUBLIC_STRAPI_TOKEN ?? "";
+const STRAPI_BASE_URL = (process.env.STRAPI_URL ?? "http://localhost:1337").replace(/\/$/, "");
+const STRAPI_API_TOKEN = process.env.STRAPI_TOKEN ?? "";
 const PAGE_SIZE = 100;
 
 function authHeaders(): HeadersInit {
@@ -234,18 +234,14 @@ function parseLinkObjects(rawLinks: unknown): Array<{ id: string; confidence?: n
 }
 
 async function computeDbStatsRaw() {
-  const [entriesRaw, usersRaw] = await Promise.all([
-    fetchAllCollection<Record<string, unknown>>(
-      "/api/entries?fields[0]=title&fields[1]=rubrik&fields[2]=links" +
-      "&fields[3]=documentId&fields[4]=docs&populate[0]=pictures",
-    ),
-    fetchAllCollection<Record<string, unknown>>(
-      "/api/customusers?fields[0]=email&fields[1]=confirmed&fields[2]=trusted&fields[3]=blocked&fields[4]=employee&fields[5]=administrator",
-    ),
-  ]);
+  const entriesRaw = await fetchAllCollection<Record<string, unknown>>(
+    "/api/entries?fields[0]=title&fields[1]=rubrik&fields[2]=links" +
+      "&fields[3]=documentId&fields[4]=docs&fields[5]=tags&populate[0]=pictures",
+  );
 
   const entries = entriesRaw.map(normalizeRecord);
-  const users   = usersRaw.map(normalizeRecord);
+  // totalUsers is filled in by the request handler (it needs the admin JWT and
+  // must not be cached per-user); see GET below.
 
   const categories     = buildCategoryList();
   const categoryCounts: Record<string, number> = {};
@@ -289,13 +285,17 @@ async function computeDbStatsRaw() {
     /* ── Docs ─────────────────────────────────────────────────────────── */
     const docsRaw = entry.docs;
     if (docsRaw) {
-      const docsText = parseText(docsRaw).trim();
-      if (docsText && docsText !== "[]") {
-        try {
-          const parsed = JSON.parse(docsText) as unknown;
-          if (Array.isArray(parsed) ? parsed.length > 0 : !!parsed) entriesWithDocs++;
-        } catch {
-          if (docsText.length > 0) entriesWithDocs++;
+      if (Array.isArray(docsRaw)) {
+        if (docsRaw.length > 0) entriesWithDocs++;
+      } else {
+        const docsText = parseText(docsRaw).trim();
+        if (docsText && docsText !== "[]") {
+          try {
+            const parsed = JSON.parse(docsText) as unknown;
+            if (Array.isArray(parsed) ? parsed.length > 0 : !!parsed) entriesWithDocs++;
+          } catch {
+            if (docsText.length > 0) entriesWithDocs++;
+          }
         }
       }
     }
@@ -348,6 +348,25 @@ async function computeDbStatsRaw() {
     }
   }
 
+  let entriesWithTags  = 0;
+  let totalTagCount    = 0;
+
+  for (const entry of entries) {
+    const tagsRaw = parseText(entry.tags ?? "").trim();
+    if (!tagsRaw) continue;
+    let tags: string[] = [];
+    try {
+      const parsed = JSON.parse(tagsRaw) as unknown;
+      if (Array.isArray(parsed)) tags = parsed.map((x) => String(x).trim()).filter(Boolean);
+    } catch {
+      tags = tagsRaw.split(/[\n,;|]+/).map((x) => x.trim()).filter(Boolean);
+    }
+    if (tags.length > 0) {
+      entriesWithTags++;
+      totalTagCount += tags.length;
+    }
+  }
+
   let oneSidedPairs = 0;
   for (const key of undirectedSet) {
     const [a, b] = key.split("::") as [string, string];
@@ -364,7 +383,7 @@ async function computeDbStatsRaw() {
   return {
     stats: {
       totalEntries:          entries.length,
-      totalUsers:            users.length,
+      totalUsers:            0,
       totalLinkPairs:        undirectedSet.size,
       totalLinkReferences,
       entriesWithLinks,
@@ -379,6 +398,9 @@ async function computeDbStatsRaw() {
       confidenceLow,
       confidenceMedium,
       confidenceHigh,
+      entriesWithTags,
+      totalTagCount,
+      avgTagsPerEntry:       entriesWithTags > 0 ? totalTagCount / entriesWithTags : 0,
       categories:            categoryCounts,
       generatedAt:           new Date().toISOString(),
     },
@@ -428,6 +450,10 @@ export async function GET(req: NextRequest) {
     const result = noCache
       ? await computeDbStatsRaw()
       : await computeDbStatsCached();
+    // Fill in the live user count (kept out of the cached compute since it
+    // needs the admin JWT and changes independently of entry data).
+    const users = await adminListUsers(jwt);
+    result.stats.totalUsers = users.length;
     return NextResponse.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to compute DB stats.";

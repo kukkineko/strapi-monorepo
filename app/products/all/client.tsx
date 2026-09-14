@@ -1,11 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { TopBar } from "@/app/components/top-bar";
 import { useLanguage } from "@/app/components/language-provider";
 import type { Entry } from "@/app/lib/entries";
-import { parseRubrikNumber, displayValue } from "@/app/lib/entries";
+import { parseRubrikNumbers, displayValue, searchEntries } from "@/app/lib/entries";
 import { HoverPreview, useHoverPreview } from "@/app/components/hover-preview";
 
 const PAGE_SIZE = 250;
@@ -26,18 +26,21 @@ function rubrikSectionValue(n: number) {
 }
 
 function inSection(entry: Entry, section: string): boolean {
-  const key    = String(entry.rubrik ?? "").trim().toLowerCase();
-  const parsed = parseRubrikNumber(entry.rubrik);
+  const nums   = parseRubrikNumbers(entry.rubrik);
+  const keys   = Array.isArray(entry.rubrik)
+    ? (entry.rubrik as unknown[]).map((v) => String(v).trim().toLowerCase())
+    : [String(entry.rubrik ?? "").trim().toLowerCase()];
 
   if (section === "all") return true;
-  if (section === "replacements") return key === "replacement" || key === "replacements";
+  if (section === "replacements") return keys.some((k) => k === "replacement" || k === "replacements");
   if (section === "extra") {
-    if (key === "extra" || key === "extras") return true;
-    return parsed === null || parsed < 1 || parsed > 15;
+    if (keys.some((k) => k === "extra" || k === "extras")) return true;
+    return nums.length === 0;
   }
   const match = section.match(/^rubrik-(?:r)?0*(\d{1,2})$/);
   if (!match) return true;
-  return parsed !== null && parsed === Number.parseInt(match[1]!, 10);
+  const target = Number.parseInt(match[1]!, 10);
+  return nums.includes(target);
 }
 
 /* ─── search helpers ─────────────────────────────────────────────────────── */
@@ -106,9 +109,13 @@ function shortDesc(entry: Entry): string {
  *    60  full query found as substring in title
  *    50  full query found in artNr / EAN
  *    40  full query found in tags
+ *    35  all tokens found individually in the tags (tokenized tag match)
  *    20  all tokens found individually in the title
  *    10  baseline (all tokens matched somewhere – already guaranteed by filter)
+ *     8  space-insensitive match only ("spatime" ≈ "spa time") — lowest weight
  */
+const collapse = (s: string) => s.replace(/[^a-z0-9]/gi, "").toLowerCase();
+
 function scoreRelevance(entry: Entry, query: string, tokens: string[]): number {
   if (!query) return 0;
 
@@ -132,8 +139,16 @@ function scoreRelevance(entry: Entry, query: string, tokens: string[]): number {
   if (artNr.includes(q) || ean.includes(q)) return 50;
   // Full query found in tags
   if (tags.includes(q)) return 40;
+  // All query tokens found individually in the tags
+  if (tokens.length > 0 && tokens.every((tok) => tags.includes(tok))) return 35;
   // All tokens found individually in the title
   if (tokens.every((tok) => title.includes(tok))) return 20;
+  // Space-insensitive fallback: "spatime" matches "spa time" in title/tags.
+  // Ranked below every direct match so exact hits always win.
+  const qc = collapse(q);
+  if (qc.length >= 3 && (collapse(title).includes(qc) || collapse(tags).includes(qc))) {
+    return 8;
+  }
   // Baseline – tokens matched somewhere in the haystack
   return 10;
 }
@@ -164,9 +179,28 @@ function sortEntries(list: Entry[], key: SortKey, dir: SortDir): Entry[] {
   });
 }
 
+/* ─── rubrik options (shared by bulk picker) ─────────────────────────────── */
+
+const BULK_RUBRIK_OPTIONS = [
+  { value: "", label: "— (keine / löschen)" },
+  ...Array.from({ length: 15 }, (_, i) => {
+    const n = i + 1;
+    const code = `R${String(n).padStart(2, "0")}`;
+    return { value: code, label: code };
+  }),
+  { value: "replacements", label: "Ersatzteile" },
+  { value: "extra", label: "Extra" },
+];
+
 /* ─── main client component ──────────────────────────────────────────────── */
 
-export function AllProductsClient({ initialEntries }: { initialEntries: Entry[] }) {
+export function AllProductsClient({
+  initialEntries,
+  canEdit = false,
+}: {
+  initialEntries: Entry[];
+  canEdit?: boolean;
+}) {
   const { t }      = useLanguage();
   const router     = useRouter();
   const pathname   = usePathname();
@@ -234,8 +268,49 @@ export function AllProductsClient({ initialEntries }: { initialEntries: Entry[] 
     });
   }, [scrollKey]);
 
-  /* ── entries come pre-loaded from the server — no fetch needed ── */
-  const entries = initialEntries;
+  /* ── working set ──
+     The server sends only the most-recently-updated entries (initialEntries).
+     That covers the default view instantly. As soon as the user types a query
+     we fetch matches from the server search endpoint (which searches the WHOLE
+     catalogue, not just the recent set), so nothing is unreachable. When the
+     box is cleared we fall straight back to the recent set. */
+  const [serverResults, setServerResults] = useState<Entry[] | null>(null);
+  const [searching, setSearching] = useState(false);
+
+  useEffect(() => {
+    const q = searchInput.trim();
+    if (!q) {
+      setServerResults(null);
+      setSearching(false);
+      return;
+    }
+    let cancelled = false;
+    setSearching(true);
+    const handle = window.setTimeout(() => {
+      void searchEntries(q, 100)
+        .then((r) => { if (!cancelled) setServerResults(r); })
+        .catch(() => { if (!cancelled) setServerResults([]); })
+        .finally(() => { if (!cancelled) setSearching(false); });
+    }, 150);
+    return () => { cancelled = true; window.clearTimeout(handle); };
+  }, [searchInput]);
+
+  /* Candidate pool = whole-catalogue server results (when a query is active)
+     UNION the locally-loaded set. Keeping the loaded set in the pool means the
+     richer client-side matching below — tokenized tags and the space-insensitive
+     "spatime" ≈ "spa time" fallback — still runs even for a query the server's
+     literal $containsi could not match. */
+  const pool = useMemo(() => {
+    if (!serverResults) return initialEntries;
+    const seen = new Set<string>();
+    const merged: Entry[] = [];
+    for (const e of [...serverResults, ...initialEntries]) {
+      if (seen.has(e.documentId)) continue;
+      seen.add(e.documentId);
+      merged.push(e);
+    }
+    return merged;
+  }, [serverResults, initialEntries]);
 
   /* ── pre-compute searchable text once per data-load, not per keystroke ──
      igsText() calls JSON.parse — doing it inside the filter loop on every
@@ -243,21 +318,21 @@ export function AllProductsClient({ initialEntries }: { initialEntries: Entry[] 
      Map<documentId → blob> once here.
 
      Each blob contains:
-       • raw text  — preserves the original spacing/punctuation so a query
-                     like "7624020" still matches "(7624020)" via substring
-       • clean text — all punctuation replaced with spaces, so a value like
-                     "kw-7624020" or "[7624020]" is also found when searching
-                     the bare number
+       • text      — raw + punctuation-as-spaces, lower-cased. Preserves word
+                     boundaries so multi-token queries and bare numbers match.
+       • collapsed — text with ALL non-alphanumerics removed, so a spaceless
+                     query ("spatime") still matches a spaced value ("spa time").
   ── */
   const searchBlobs = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const e of entries) {
-      const raw   = `${e.title} ${e.artNr ?? ""} ${e.EAN ?? ""} ${e.tags ?? ""} ${igsText(e.igs)}`;
+    const map = new Map<string, { text: string; collapsed: string }>();
+    for (const e of pool) {
+      const raw   = `${e.title} ${e.artNr ?? ""} ${e.EAN ?? ""} ${e.documentId} ${e.tags ?? ""} ${e.desc ?? ""} ${igsText(e.igs)}`;
       const clean = raw.replace(/[^a-z0-9 ]/gi, " ");
-      map.set(e.documentId, `${raw} ${clean}`.toLowerCase());
+      const text  = `${raw} ${clean}`.toLowerCase();
+      map.set(e.documentId, { text, collapsed: text.replace(/[^a-z0-9]/g, "") });
     }
     return map;
-  }, [entries]);
+  }, [pool]);
 
   /* ── reset page on filter/sort/search change ── */
   useEffect(() => {
@@ -269,11 +344,17 @@ export function AllProductsClient({ initialEntries }: { initialEntries: Entry[] 
     const q      = searchInput.trim().toLowerCase();
     const tokens = tokenize(q);
 
-    const filtered = entries.filter((e) => {
+    const qc = q.replace(/[^a-z0-9]/g, "");
+
+    const filtered = pool.filter((e) => {
       if (!inSection(e, section)) return false;
       if (!q) return true;
-      const haystack = searchBlobs.get(e.documentId) ?? "";
-      return tokens.every((tok) => haystack.includes(tok));
+      const blob = searchBlobs.get(e.documentId);
+      if (!blob) return false;
+      // Direct: every token appears somewhere in the searchable text.
+      if (tokens.every((tok) => blob.text.includes(tok))) return true;
+      // Space-insensitive fallback: "spatime" matches "spa time".
+      return qc.length >= 3 && blob.collapsed.includes(qc);
     });
 
     /* When a search query is active, sort by relevance first (best match at
@@ -297,7 +378,7 @@ export function AllProductsClient({ initialEntries }: { initialEntries: Entry[] 
     return columnSorted.sort(
       (a, b) => (scoreMap.get(b.documentId) ?? 0) - (scoreMap.get(a.documentId) ?? 0),
     );
-  }, [entries, section, sortKey, sortDir, searchInput, searchBlobs]);
+  }, [pool, section, sortKey, sortDir, searchInput, searchBlobs]);
 
   /* hide preview whenever the visible item set changes (filter / sort / search /
      load-more) — the hovered element may no longer be in the DOM so onMouseLeave
@@ -343,13 +424,189 @@ export function AllProductsClient({ initialEntries }: { initialEntries: Entry[] 
     router.push(`/products/${entry.documentId}?from=${from}`);
   }
 
+  /* ── bulk multi-select (editors only) ── */
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkMsg, setBulkMsg] = useState<string | null>(null);
+  const [tagDialogOpen, setTagDialogOpen] = useState(false);
+  const [bulkTag, setBulkTag] = useState("");
+  const [linkDialogOpen, setLinkDialogOpen] = useState(false);
+  const [unlinkDialogOpen, setUnlinkDialogOpen] = useState(false);
+  const [bulkLinkSource, setBulkLinkSource] = useState("");
+  const [bulkLinkConfidence, setBulkLinkConfidence] = useState("");
+  const [targetQuery, setTargetQuery] = useState("");
+  const [targetSelected, setTargetSelected] = useState<Set<string>>(new Set());
+  const [rubrikDialogOpen, setRubrikDialogOpen] = useState(false);
+  const [bulkRubriks, setBulkRubriks] = useState<Set<string>>(new Set());
+
+  const toggleSelected = useCallback((docId: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(docId)) next.delete(docId);
+      else next.add(docId);
+      return next;
+    });
+  }, []);
+
+  const toggleTarget = useCallback((docId: string) => {
+    setTargetSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(docId)) next.delete(docId);
+      else next.add(docId);
+      return next;
+    });
+  }, []);
+
+  function clearSelection() {
+    setSelected(new Set());
+    setBulkMsg(null);
+  }
+
+  function closeLinkDialog() {
+    setLinkDialogOpen(false);
+    setTargetQuery("");
+    setTargetSelected(new Set());
+    setBulkLinkSource("");
+    setBulkLinkConfidence("");
+  }
+
+  function closeUnlinkDialog() {
+    setUnlinkDialogOpen(false);
+    setTargetQuery("");
+    setTargetSelected(new Set());
+  }
+
+  /* Target candidates for the link/unlink dialogs. An empty query shows the
+     recent set; a typed query hits the server search so editors can link to
+     ANY item in the catalogue, not just the recently-updated ones. */
+  const [targetResults, setTargetResults] = useState<Entry[]>([]);
+  useEffect(() => {
+    if (!linkDialogOpen && !unlinkDialogOpen) {
+      setTargetResults([]);
+      return;
+    }
+    const q = targetQuery.trim();
+    if (!q) {
+      setTargetResults(initialEntries.slice(0, 100));
+      return;
+    }
+    let cancelled = false;
+    const handle = window.setTimeout(() => {
+      void searchEntries(q, 100)
+        .then((r) => { if (!cancelled) setTargetResults(r); })
+        .catch(() => { if (!cancelled) setTargetResults([]); });
+    }, 300);
+    return () => { cancelled = true; window.clearTimeout(handle); };
+  }, [linkDialogOpen, unlinkDialogOpen, targetQuery, initialEntries]);
+
+  async function handleBulkTag(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const tag = bulkTag.trim();
+    if (!tag || selected.size === 0 || bulkBusy) return;
+    try {
+      setBulkBusy(true);
+      const res = await fetch("/api/entries/bulk-tag", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [...selected], tag }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { updated?: number; error?: string };
+      if (!res.ok) throw new Error(data.error ?? "Failed to add tag.");
+      setBulkMsg(`Added tag “${tag}” to ${data.updated ?? 0} item(s).`);
+      setTagDialogOpen(false);
+      setBulkTag("");
+      clearSelection();
+      router.refresh();
+    } catch (err) {
+      setBulkMsg(err instanceof Error ? err.message : "Failed to add tag.");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  async function handleBulkLink() {
+    if (selected.size === 0 || targetSelected.size === 0 || bulkBusy) return;
+    try {
+      setBulkBusy(true);
+      const confidenceNum = bulkLinkConfidence.trim()
+        ? Math.min(1, Math.max(0, Number(bulkLinkConfidence) / 100))
+        : undefined;
+      const res = await fetch("/api/entries/bulk-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sourceIds: [...selected],
+          targetIds: [...targetSelected],
+          ...(confidenceNum !== undefined && !Number.isNaN(confidenceNum) && { confidence: confidenceNum }),
+          ...(bulkLinkSource.trim() && { source: bulkLinkSource.trim() }),
+        }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { updated?: number; error?: string };
+      if (!res.ok) throw new Error(data.error ?? "Failed to link items.");
+      setBulkMsg(`Linked ${selected.size} item(s) to ${targetSelected.size} target(s) — ${data.updated ?? 0} entries updated.`);
+      closeLinkDialog();
+      clearSelection();
+      router.refresh();
+    } catch (err) {
+      setBulkMsg(err instanceof Error ? err.message : "Failed to link items.");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  async function handleBulkUnlink() {
+    if (selected.size === 0 || targetSelected.size === 0 || bulkBusy) return;
+    try {
+      setBulkBusy(true);
+      const res = await fetch("/api/entries/bulk-unlink", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sourceIds: [...selected], targetIds: [...targetSelected] }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { updated?: number; linksRemoved?: number; error?: string };
+      if (!res.ok) throw new Error(data.error ?? "Failed to unlink items.");
+      setBulkMsg(`Removed ${data.linksRemoved ?? 0} link(s) across ${data.updated ?? 0} entries.`);
+      closeUnlinkDialog();
+      clearSelection();
+      router.refresh();
+    } catch (err) {
+      setBulkMsg(err instanceof Error ? err.message : "Failed to unlink items.");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  async function handleBulkRubrik() {
+    if (selected.size === 0 || bulkBusy) return;
+    try {
+      setBulkBusy(true);
+      const rubriks = [...bulkRubriks];
+      const res = await fetch("/api/entries/bulk-rubrik", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [...selected], rubriks }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { updated?: number; error?: string };
+      if (!res.ok) throw new Error(data.error ?? "Failed to set rubrik.");
+      const label = rubriks.length > 0 ? rubriks.join(", ") : "(keine)";
+      setBulkMsg(`Rubrik "${label}" gesetzt für ${data.updated ?? 0} Artikel.`);
+      setRubrikDialogOpen(false);
+      clearSelection();
+      router.refresh();
+    } catch (err) {
+      setBulkMsg(err instanceof Error ? err.message : "Failed to set rubrik.");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
   /* ─────────────────────────────────────────────────────────────────────── */
   return (
     <main className="wiki-shell">
       <TopBar
         actions={[
           { href: "/",             label: t.nav.home },
-          { href: "/products/new", label: t.nav.createNewPage, primary: true },
+          { href: "/products/new", label: t.nav.createNewPage, primary: true, adminOnly: true },
         ]}
       />
 
@@ -413,7 +670,7 @@ export function AllProductsClient({ initialEntries }: { initialEntries: Entry[] 
             {Math.min(visibleCount, displayedEntries.length).toLocaleString()}
             {" / "}
             {displayedEntries.length.toLocaleString()}
-            {entries.length !== displayedEntries.length && ` (${entries.length.toLocaleString()} total)`}
+            {pool.length !== displayedEntries.length && ` (${pool.length.toLocaleString()} total)`}
             {" items"}
           </span>
         </div>
@@ -421,9 +678,11 @@ export function AllProductsClient({ initialEntries }: { initialEntries: Entry[] 
         {/* ── Empty state ── */}
         {displayedEntries.length === 0 && (
           <p className="wiki-muted" style={{ textAlign: "center", padding: "2rem 0" }}>
-            {searchInput.trim()
-              ? `No results for "${searchInput.trim()}" in this section.`
-              : t.listing.noEntries}
+            {searching
+              ? "Searching…"
+              : searchInput.trim()
+                ? `No results for "${searchInput.trim()}" in this section.`
+                : t.listing.noEntries}
           </p>
         )}
 
@@ -435,47 +694,69 @@ export function AllProductsClient({ initialEntries }: { initialEntries: Entry[] 
                 const tags  = parseTags(entry.tags).slice(0, 5);
                 const desc  = shortDesc(entry);
                 const thumb = entry.pictureUrls?.[0];
+                const isSelected = selected.has(entry.documentId);
 
                 return (
-                  <button
+                  <div
                     key={entry.documentId}
-                    type="button"
-                    className="wiki-product-card"
-                    onClick={() => navigateTo(entry)}
+                    className={`wiki-product-card-wrap${isSelected ? " selected" : ""}`}
                     onMouseEnter={(e) => showPreview(entry, e.currentTarget)}
                     onMouseLeave={hidePreview}
                   >
-                    {/* Thumbnail */}
-                    <div className="wiki-product-thumb">
-                      {thumb
-                        ? <img src={thumb} alt="" loading="lazy" />
-                        : <span className="wiki-product-thumb-ph">no image</span>}
-                    </div>
-
-                    {/* Info */}
-                    <div className="wiki-product-info">
-                      <div className="wiki-product-title">{entry.title}</div>
-
-                      <div className="wiki-product-meta">
-                        {entry.artNr && <>ArtNr:&nbsp;<strong>{displayValue(entry.artNr)}</strong></>}
-                        {entry.artNr && entry.EAN && <>&ensp;·&ensp;</>}
-                        {entry.EAN   && <>EAN:&nbsp;<strong>{displayValue(entry.EAN)}</strong></>}
-                        {!entry.artNr && !entry.EAN && <span className="wiki-muted">—</span>}
+                    {/* Navigation button — thumb + info + tags columns */}
+                    <button
+                      type="button"
+                      className="wiki-product-card"
+                      onClick={() => navigateTo(entry)}
+                    >
+                      {/* Thumbnail */}
+                      <div className="wiki-product-thumb">
+                        {thumb
+                          ? <img src={thumb} alt="" loading="lazy" />
+                          : <span className="wiki-product-thumb-ph">no image</span>}
                       </div>
 
-                      {desc && (
-                        <div className="wiki-product-desc">{desc}</div>
-                      )}
+                      {/* Info: title / artNr+EAN / desc */}
+                      <div className="wiki-product-info">
+                        <div className="wiki-product-title">{entry.title}</div>
 
+                        <div className="wiki-product-meta">
+                          {entry.artNr && <>ArtNr:&nbsp;<strong>{displayValue(entry.artNr)}</strong></>}
+                          {entry.artNr && entry.EAN && <>&ensp;·&ensp;</>}
+                          {entry.EAN   && <>EAN:&nbsp;<strong>{displayValue(entry.EAN)}</strong></>}
+                          {!entry.artNr && !entry.EAN && <span className="wiki-muted">—</span>}
+                        </div>
+
+                        {desc && (
+                          <div className="wiki-product-desc">{desc}</div>
+                        )}
+                      </div>
+
+                      {/* Tags — right column */}
                       {tags.length > 0 && (
-                        <div className="wiki-product-tags">
+                        <div className="wiki-product-tags-col">
                           {tags.map((tag) => (
                             <span key={tag} className="wiki-tag-pill">{tag}</span>
                           ))}
                         </div>
                       )}
-                    </div>
-                  </button>
+                    </button>
+
+                    {/* Selector — far right, outside the nav button */}
+                    {canEdit && (
+                      <label
+                        className="wiki-product-select-col"
+                        title="Select"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleSelected(entry.documentId)}
+                        />
+                      </label>
+                    )}
+                  </div>
                 );
               })}
             </div>
@@ -496,6 +777,415 @@ export function AllProductsClient({ initialEntries }: { initialEntries: Entry[] 
       </section>
 
       <HoverPreview target={hoverTarget} />
+
+      {/* ── Bulk action bar (editors, when something is selected) ── */}
+      {canEdit && selected.size > 0 && (
+        <div
+          style={{
+            position: "fixed",
+            left: 0,
+            right: 0,
+            bottom: 0,
+            zIndex: 1000,
+            display: "flex",
+            alignItems: "center",
+            gap: "0.75rem",
+            flexWrap: "wrap",
+            padding: "0.75rem 1rem",
+            background: "#0f172a",
+            color: "#fff",
+            boxShadow: "0 -4px 20px rgba(15,23,42,0.35)",
+          }}
+        >
+          <strong>{selected.size.toLocaleString()} selected</strong>
+          <button
+            type="button"
+            className="wiki-button"
+            onClick={() => setSelected(new Set(displayedEntries.map((e) => e.documentId)))}
+          >
+            Select all ({displayedEntries.length.toLocaleString()})
+          </button>
+          <button type="button" className="wiki-button" onClick={clearSelection}>
+            Clear
+          </button>
+          <span style={{ flex: 1, minWidth: "1rem" }} />
+          {bulkMsg && <span style={{ fontSize: "0.85rem", opacity: 0.92 }}>{bulkMsg}</span>}
+          <button
+            type="button"
+            className="wiki-button"
+            onClick={() => { setBulkTag(""); setBulkMsg(null); setTagDialogOpen(true); }}
+          >
+            Add tag…
+          </button>
+          <button
+            type="button"
+            className="wiki-button"
+            onClick={() => { setBulkRubriks(new Set()); setBulkMsg(null); setRubrikDialogOpen(true); }}
+          >
+            Set rubrik…
+          </button>
+          <button
+            type="button"
+            className="wiki-button"
+            style={{ background: "#2563eb", color: "#fff", borderColor: "#2563eb" }}
+            onClick={() => { setBulkMsg(null); setLinkDialogOpen(true); }}
+          >
+            Link…
+          </button>
+          <button
+            type="button"
+            className="wiki-button"
+            style={{ background: "#dc2626", color: "#fff", borderColor: "#dc2626" }}
+            onClick={() => { setBulkMsg(null); setUnlinkDialogOpen(true); }}
+          >
+            Unlink…
+          </button>
+        </div>
+      )}
+
+      {/* ── Add-tag dialog ── */}
+      {canEdit && tagDialogOpen && (
+        <div className="wiki-modal" onClick={() => !bulkBusy && setTagDialogOpen(false)}>
+          <div
+            className="wiki-modal-dialog"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: "440px" }}
+          >
+            <div className="wiki-modal-header">
+              <div>
+                <h2>Add tag to {selected.size} item(s)</h2>
+                <p>The tag is added to each selected item (duplicates skipped).</p>
+              </div>
+            </div>
+            <form
+              onSubmit={handleBulkTag}
+              style={{ display: "flex", flexDirection: "column", gap: "0.75rem", padding: "1rem" }}
+            >
+              <input
+                type="text"
+                className="wiki-list-search"
+                value={bulkTag}
+                onChange={(e) => setBulkTag(e.target.value)}
+                placeholder="Tag"
+                autoFocus
+                disabled={bulkBusy}
+              />
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.5rem" }}>
+                <button type="button" className="wiki-button" onClick={() => setTagDialogOpen(false)} disabled={bulkBusy}>
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="wiki-button"
+                  style={{ background: "#2563eb", color: "#fff", borderColor: "#2563eb" }}
+                  disabled={bulkBusy || !bulkTag.trim()}
+                >
+                  {bulkBusy ? "Adding…" : "Add tag"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Set-rubrik dialog ── */}
+      {canEdit && rubrikDialogOpen && (
+        <div className="wiki-modal" onClick={() => !bulkBusy && setRubrikDialogOpen(false)}>
+          <div
+            className="wiki-modal-dialog"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: "360px" }}
+          >
+            <div className="wiki-modal-header">
+              <div>
+                <h2>Rubrik setzen für {selected.size} Artikel</h2>
+                <p>Setzt die Kategorie für alle gewählten Artikel.</p>
+              </div>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", padding: "1rem" }}>
+              <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--wiki-muted, #6b7280)" }}>
+                Mehrere Kategorien möglich. Leer lassen = Zuweisung entfernen.
+              </p>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.35rem 1rem" }}>
+                {BULK_RUBRIK_OPTIONS.filter((o) => o.value !== "").map((opt) => (
+                  <label key={opt.value} style={{ display: "flex", alignItems: "center", gap: "0.4rem", cursor: "pointer", fontSize: "0.9rem" }}>
+                    <input
+                      type="checkbox"
+                      checked={bulkRubriks.has(opt.value)}
+                      disabled={bulkBusy}
+                      onChange={() => {
+                        setBulkRubriks((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(opt.value)) next.delete(opt.value); else next.add(opt.value);
+                          return next;
+                        });
+                      }}
+                    />
+                    {opt.label}
+                  </label>
+                ))}
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.5rem" }}>
+                <button type="button" className="wiki-button" onClick={() => setRubrikDialogOpen(false)} disabled={bulkBusy}>
+                  Abbrechen
+                </button>
+                <button
+                  type="button"
+                  className="wiki-button"
+                  style={{ background: "#2563eb", color: "#fff", borderColor: "#2563eb" }}
+                  onClick={() => void handleBulkRubrik()}
+                  disabled={bulkBusy}
+                >
+                  {bulkBusy ? "Speichern…" : `Setzen für ${selected.size} Artikel`}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Unlink target picker dialog ── */}
+      {canEdit && unlinkDialogOpen && (
+        <div className="wiki-modal" onClick={() => !bulkBusy && closeUnlinkDialog()}>
+          <div
+            className="wiki-modal-dialog"
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: "min(720px, 96vw)", maxHeight: "86vh", display: "flex", flexDirection: "column" }}
+          >
+            <div className="wiki-modal-header">
+              <div>
+                <h2>Unlink {selected.size} item(s) from…</h2>
+                <p>Pick items to remove links to. Links are removed both ways.</p>
+              </div>
+            </div>
+            <div style={{ padding: "0 1rem" }}>
+              <input
+                type="text"
+                className="wiki-list-search"
+                value={targetQuery}
+                onChange={(e) => setTargetQuery(e.target.value)}
+                placeholder="Search items to unlink from…"
+                autoFocus
+              />
+            </div>
+            <div
+              style={{
+                overflowY: "auto",
+                flex: 1,
+                padding: "0.5rem 1rem",
+                display: "flex",
+                flexDirection: "column",
+                gap: "0.2rem",
+              }}
+            >
+              {targetResults.length === 0 ? (
+                <p className="wiki-muted">No matching items.</p>
+              ) : (
+                targetResults.map((e) => {
+                  const checked  = targetSelected.has(e.documentId);
+                  const isSource = selected.has(e.documentId);
+                  const tgtTags  = parseTags(e.tags).slice(0, 5);
+                  return (
+                    <label
+                      key={e.documentId}
+                      style={{
+                        display: "flex",
+                        gap: "0.6rem",
+                        alignItems: "flex-start",
+                        padding: "0.4rem 0.5rem",
+                        borderRadius: "8px",
+                        background: checked ? "#fff1f2" : "transparent",
+                        cursor: isSource ? "not-allowed" : "pointer",
+                        opacity: isSource ? 0.5 : 1,
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={isSource}
+                        onChange={() => toggleTarget(e.documentId)}
+                        style={{ marginTop: "3px", width: "16px", height: "16px" }}
+                      />
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontWeight: 600 }}>
+                          {e.title}
+                          {isSource && <span className="wiki-muted"> (selected source)</span>}
+                        </div>
+                        <div className="wiki-muted" style={{ fontSize: "0.8rem" }}>
+                          ArtNr {displayValue(e.artNr)} · EAN {displayValue(e.EAN)}
+                        </div>
+                        {tgtTags.length > 0 && (
+                          <div className="wiki-product-tags">
+                            {tgtTags.map((tg) => (
+                              <span key={tg} className="wiki-tag-pill">{tg}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </label>
+                  );
+                })
+              )}
+            </div>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "0.5rem",
+                padding: "0.75rem 1rem",
+                borderTop: "1px solid #e2e8f0",
+              }}
+            >
+              <span className="wiki-muted">{targetSelected.size} selected</span>
+              <span style={{ flex: 1 }} />
+              <button type="button" className="wiki-button" onClick={closeUnlinkDialog} disabled={bulkBusy}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="wiki-button"
+                style={{ background: "#dc2626", color: "#fff", borderColor: "#dc2626" }}
+                onClick={() => void handleBulkUnlink()}
+                disabled={bulkBusy || targetSelected.size === 0}
+              >
+                {bulkBusy ? "Unlinking…" : `Unlink ${selected.size}×${targetSelected.size}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Link target picker dialog ── */}
+      {canEdit && linkDialogOpen && (
+        <div className="wiki-modal" onClick={() => !bulkBusy && closeLinkDialog()}>
+          <div
+            className="wiki-modal-dialog"
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: "min(720px, 96vw)", maxHeight: "86vh", display: "flex", flexDirection: "column" }}
+          >
+            <div className="wiki-modal-header">
+              <div>
+                <h2>Link {selected.size} item(s) to…</h2>
+                <p>Pick the target items. Links are created both ways.</p>
+              </div>
+            </div>
+            <div style={{ padding: "0 1rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+              <div style={{ display: "flex", gap: "0.5rem" }}>
+                <input
+                  type="text"
+                  className="wiki-list-search"
+                  style={{ flex: 1, marginBottom: 0 }}
+                  value={bulkLinkSource}
+                  onChange={(e) => setBulkLinkSource(e.target.value)}
+                  placeholder="Source (optional)"
+                />
+                <input
+                  type="number"
+                  className="wiki-list-search"
+                  style={{ width: "110px", marginBottom: 0 }}
+                  value={bulkLinkConfidence}
+                  onChange={(e) => setBulkLinkConfidence(e.target.value)}
+                  placeholder="Confidence %"
+                  min={0}
+                  max={100}
+                />
+              </div>
+              <input
+                type="text"
+                className="wiki-list-search"
+                style={{ marginBottom: 0 }}
+                value={targetQuery}
+                onChange={(e) => setTargetQuery(e.target.value)}
+                placeholder="Search items to link to…"
+                autoFocus
+              />
+            </div>
+            <div
+              style={{
+                overflowY: "auto",
+                flex: 1,
+                padding: "0.5rem 1rem",
+                display: "flex",
+                flexDirection: "column",
+                gap: "0.2rem",
+              }}
+            >
+              {targetResults.length === 0 ? (
+                <p className="wiki-muted">No matching items.</p>
+              ) : (
+                targetResults.map((e) => {
+                  const checked = targetSelected.has(e.documentId);
+                  const isSource = selected.has(e.documentId);
+                  const tgtTags = parseTags(e.tags).slice(0, 5);
+                  return (
+                    <label
+                      key={e.documentId}
+                      style={{
+                        display: "flex",
+                        gap: "0.6rem",
+                        alignItems: "flex-start",
+                        padding: "0.4rem 0.5rem",
+                        borderRadius: "8px",
+                        background: checked ? "#eff6ff" : "transparent",
+                        cursor: isSource ? "not-allowed" : "pointer",
+                        opacity: isSource ? 0.5 : 1,
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={isSource}
+                        onChange={() => toggleTarget(e.documentId)}
+                        style={{ marginTop: "3px", width: "16px", height: "16px" }}
+                      />
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontWeight: 600 }}>
+                          {e.title}
+                          {isSource && <span className="wiki-muted"> (selected source)</span>}
+                        </div>
+                        <div className="wiki-muted" style={{ fontSize: "0.8rem" }}>
+                          ArtNr {displayValue(e.artNr)} · EAN {displayValue(e.EAN)}
+                        </div>
+                        {tgtTags.length > 0 && (
+                          <div className="wiki-product-tags">
+                            {tgtTags.map((tg) => (
+                              <span key={tg} className="wiki-tag-pill">{tg}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </label>
+                  );
+                })
+              )}
+            </div>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "0.5rem",
+                padding: "0.75rem 1rem",
+                borderTop: "1px solid #e2e8f0",
+              }}
+            >
+              <span className="wiki-muted">{targetSelected.size} target(s)</span>
+              <span style={{ flex: 1 }} />
+              <button type="button" className="wiki-button" onClick={closeLinkDialog} disabled={bulkBusy}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="wiki-button"
+                style={{ background: "#2563eb", color: "#fff", borderColor: "#2563eb" }}
+                onClick={handleBulkLink}
+                disabled={bulkBusy || targetSelected.size === 0}
+              >
+                {bulkBusy ? "Linking…" : `Link ${selected.size}×${targetSelected.size}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

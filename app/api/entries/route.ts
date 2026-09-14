@@ -2,15 +2,49 @@ import { NextResponse } from "next/server";
 import {
   getSessionJwt,
   loadUserContext,
-  saveUserSchemaData,
+  updateMe,
 } from "@/app/lib/auth-server";
-import { createEntry } from "@/app/lib/entries";
-import type { EntryPayload } from "@/app/lib/entries";
+import { createEntry, listEntries } from "@/app/lib/entries";
+import type { Entry, EntryPayload } from "@/app/lib/entries";
 import {
   appendAuditLog,
   buildAuditDetails,
   type AuditLogEntry,
+  type AuditSnapshot,
 } from "@/app/lib/audit-log";
+
+/** Fields that must never reach a non-staff browser. */
+const EMPLOYEE_ONLY_FIELDS: ReadonlyArray<keyof Entry> = ["igs", "issues", "tickets"];
+
+function stripEmployeeFields(entry: Entry): Entry {
+  return Object.fromEntries(
+    Object.entries(entry).filter(
+      ([key]) => !EMPLOYEE_ONLY_FIELDS.includes(key as keyof Entry),
+    ),
+  ) as Entry;
+}
+
+/**
+ * GET /api/entries
+ *
+ * Full entry list for the browser (e.g. the link picker). The Strapi token
+ * stays on the server, and employee-only fields are stripped for non-staff
+ * before any data leaves the server.
+ */
+export async function GET() {
+  const jwt = await getSessionJwt();
+  if (!jwt) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+  const context = await loadUserContext(jwt);
+  if (!context?.user) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+  if (context.user.blocked) return NextResponse.json({ error: "Your account has been suspended." }, { status: 403 });
+
+  const entries = await listEntries();
+  const isEmployee = context.user.employee === true;
+  const safe = isEmployee ? entries : entries.map(stripEmployeeFields);
+  return NextResponse.json(safe, {
+    headers: { "Cache-Control": "private, max-age=60, stale-while-revalidate=300" },
+  });
+}
 
 /**
  * POST /api/entries
@@ -36,7 +70,13 @@ export async function POST(request: Request) {
     );
   }
 
-  /* ── Trusted check ──────────────────────────────────────────────────────── */
+  /* ── Trusted + not-blocked check ───────────────────────────────────────── */
+  if (context.user.blocked) {
+    return NextResponse.json(
+      { error: "Your account has been suspended." },
+      { status: 403 },
+    );
+  }
   if (!context.user.trusted) {
     return NextResponse.json(
       { error: "Permission denied. Only trusted users can create entries." },
@@ -64,7 +104,8 @@ export async function POST(request: Request) {
     const entry = await createEntry(payload);
 
     /* ── Audit log ────────────────────────────────────────────────────────── */
-    if (context.schema) {
+    {
+      const snapshot: AuditSnapshot = { createdId: entry.documentId };
       const logEntry: AuditLogEntry = {
         action: "create",
         timestamp: new Date().toISOString(),
@@ -72,10 +113,11 @@ export async function POST(request: Request) {
         entryTitle: entry.title,
         section: _auditSection || "entry",
         details: buildAuditDetails("create", "entry", entry.title),
+        snapshot,
       };
 
-      const nextData = appendAuditLog(context.schema.data, logEntry);
-      await saveUserSchemaData(context.schema.path, { data: nextData });
+      const nextLog = appendAuditLog(context.user.auditLog, logEntry);
+      await updateMe(jwt, { auditLog: nextLog });
     }
 
     return NextResponse.json(entry);

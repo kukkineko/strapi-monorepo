@@ -35,7 +35,18 @@ import {
   TOPBAR_LOGO_WIDTH,
 } from "@/app/lib/topbar-icons";
 
-type TopBarAction = { href: string; label: string; primary?: boolean; adminOnly?: boolean };
+type TopBarAction = {
+  href: string;
+  label: string;
+  primary?: boolean;
+  adminOnly?: boolean;
+  /** Set explicitly by callers that mean "the back button" — used instead of
+   *  matching on `label`/`href` text so a locale swap or a `from=` query
+   *  value can never silently change which action gets intercepted (see
+   *  onBackItemClick below: interception is what keeps an untrusted `href`
+   *  from ever being followed as a raw anchor navigation). */
+  isBack?: boolean;
+};
 type TopBarProps = { actions: TopBarAction[] };
 
 const SEARCH_HISTORY_KEY = "wiki-search-history";
@@ -59,7 +70,7 @@ function isTrackableItemPath(pathname: string): boolean {
 function actionIconSrc(action: TopBarAction): string {
   const label = action.label.toLowerCase();
   const href  = action.href.toLowerCase();
-  if (label.includes("back") || href.includes("from=") || label.includes("zuruck")) return TOPBAR_ICON_BACK;
+  if (action.isBack || label.includes("back") || label.includes("zuruck"))         return TOPBAR_ICON_BACK;
   if (label.includes("home") || href === "/")                                        return TOPBAR_ICON_HOME;
   if (label.includes("edit") || href.includes("/edit"))                              return TOPBAR_ICON_EDIT;
   if (label.includes("create") || label.includes("new") || href.includes("/new"))   return TOPBAR_ICON_CREATE;
@@ -70,7 +81,7 @@ function actionIconSrc(action: TopBarAction): string {
 function actionIconSize(action: TopBarAction): number {
   const label = action.label.toLowerCase();
   const href  = action.href.toLowerCase();
-  if (label.includes("back") || href.includes("from=") || label.includes("zuruck")) return TOPBAR_ICON_BACK_SIZE;
+  if (action.isBack || label.includes("back") || label.includes("zuruck"))         return TOPBAR_ICON_BACK_SIZE;
   if (label.includes("home") || href === "/")                                        return TOPBAR_ICON_HOME_SIZE;
   if (label.includes("edit") || href.includes("/edit"))                              return TOPBAR_ICON_EDIT_SIZE;
   if (label.includes("create") || label.includes("new") || href.includes("/new"))   return TOPBAR_ICON_CREATE_SIZE;
@@ -291,7 +302,7 @@ export function TopBar({ actions }: TopBarProps) {
         .then((r)  => { if (!cancelled) setSearchPreview(r);  })
         .catch(()  => { if (!cancelled) setSearchPreview([]); })
         .finally(() => { if (!cancelled) setSearchPreviewLoading(false); });
-    }, 350);
+    }, 200);
     return () => { cancelled = true; window.clearTimeout(id); };
   }, [searchValue]);
 
@@ -373,7 +384,9 @@ export function TopBar({ actions }: TopBarProps) {
               data-tooltip={action.label}
               title={action.label}
               onClick={
-                action.label.toLowerCase().includes("back") ? onBackItemClick : undefined
+                action.isBack || action.label.toLowerCase().includes("back")
+                  ? onBackItemClick
+                  : undefined
               }
             >
               <Image

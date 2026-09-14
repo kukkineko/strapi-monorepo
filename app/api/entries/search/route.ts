@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { searchEntries } from "@/app/lib/entries";
-import { getSessionJwt, loadUserContext } from "@/app/lib/auth-server";
+import { getSessionJwt, loadUserContextCached } from "@/app/lib/auth-server";
 import type { Entry } from "@/app/lib/entries";
 
 /** Fields that must not reach non-employee browsers. */
@@ -25,16 +25,22 @@ export async function GET(req: NextRequest) {
     return NextResponse.json([], { headers: { "Cache-Control": "private, no-store" } });
   }
 
-  const entries = await searchEntries(q, limit);
+  const jwt = await getSessionJwt();
+  if (!jwt) return NextResponse.json([], { status: 401 });
 
-  let isEmployee = false;
-  try {
-    const jwt = await getSessionJwt();
-    if (jwt) {
-      const ctx  = await loadUserContext(jwt);
-      isEmployee = ctx?.user?.employee === true;
-    }
-  } catch { /* fail safe — treat as non-employee */ }
+  // Run auth and the search concurrently instead of serially. The search runs
+  // speculatively but its results are only released after auth passes below,
+  // so an unauthorized caller still gets nothing — we just don't pay for the
+  // two Strapi round-trips one after the other.
+  const [context, entries] = await Promise.all([
+    loadUserContextCached(jwt),
+    searchEntries(q, limit),
+  ]);
+
+  if (!context?.user) return NextResponse.json([], { status: 401 });
+  if (context.user.blocked) return NextResponse.json([], { status: 403 });
+
+  const isEmployee = context.user.employee === true;
 
   const safeEntries: Entry[] = isEmployee
     ? entries
