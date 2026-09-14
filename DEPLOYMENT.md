@@ -16,9 +16,15 @@ Adjust `example.com` and paths to your setup.
 Two things get transferred out-of-band (they are intentionally not in git):
 
 1. **The code** — either `git clone` this private repo, or upload the code zip.
-2. **The data export** — a folder/zip containing:
+2. **The data export** — a zip containing:
    - `database.sql` — the PostgreSQL dump
    - `uploads/` — the Strapi media files
+
+   Use `scripts/db-backup.sh export` on the source host to produce this zip
+   (and `scripts/db-backup.sh import <file>.zip` on the destination host to
+   restore it) instead of doing the pg_dump/copy steps by hand — see
+   [scripts/db-backup.sh](scripts/db-backup.sh) for usage. It never reads or
+   writes `.env` files; secrets always transfer separately (see step 4).
 
 ---
 
@@ -31,8 +37,8 @@ sudo apt update && sudo apt upgrade -y
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt install -y nodejs
 
-# PostgreSQL, nginx, build tools, unzip
-sudo apt install -y postgresql postgresql-contrib nginx build-essential git unzip
+# PostgreSQL, nginx, build tools, zip/unzip (zip/unzip needed by scripts/db-backup.sh)
+sudo apt install -y postgresql postgresql-contrib nginx build-essential git zip unzip
 
 # PM2 process manager
 sudo npm install -g pm2
