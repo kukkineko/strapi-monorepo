@@ -117,6 +117,14 @@ pm2 start pm2.config.js
 Then, in the Strapi admin (`/admin`), create a fresh **API token** and put it in
 the frontend `.env.local` as `STRAPI_TOKEN`.
 
+> **If nginx (step 7) isn't set up yet**, `/admin` isn't reachable through the
+> domain yet either. Once the firewall (step 9) is active, port 1337 isn't
+> reachable from outside at all — use
+> `sudo scripts/toggle-strapi-port.sh on` to open it just long enough to log
+> in directly via `http://<server-ip>:1337/admin`, then
+> `sudo scripts/toggle-strapi-port.sh off` immediately after. See step 9 for
+> details.
+
 ---
 
 ## 5. Frontend (Next.js)
@@ -200,6 +208,33 @@ sudo ufw enable
 ```
 
 Ports 3000 and 1337 stay internal — only 80/443 are exposed. Good.
+
+> If you're on a cloud VPS (AWS/GCP/Azure/DigitalOcean/...), check whether
+> there's **also** a provider-level firewall/security group in front of the
+> instance — `ufw` only controls the host's own firewall. On AWS specifically,
+> the EC2 Security Group for the instance needs its own rule for any port you
+> open here too, or `ufw allow` alone won't make it reachable.
+
+### Temporary direct access to Strapi (port 1337)
+
+Day-to-day, the Strapi admin panel is only reached through nginx at
+`https://example.com/admin` (step 7) — port 1337 itself stays closed to the
+internet per the `ufw` rules above. Occasionally you need to reach it
+directly instead — e.g. creating the first admin user before nginx is
+configured, or troubleshooting Strapi with nginx out of the picture. Use
+[scripts/toggle-strapi-port.sh](scripts/toggle-strapi-port.sh) rather than a
+one-off `ufw allow` that's easy to forget about afterward:
+
+```bash
+sudo scripts/toggle-strapi-port.sh on       # opens 1337, prints the URL to visit
+#   ... do what you needed to do at http://<server-ip>:1337/admin ...
+sudo scripts/toggle-strapi-port.sh off      # close it again
+sudo scripts/toggle-strapi-port.sh status   # check without changing anything
+```
+
+While it's "on", Strapi is reachable over plain HTTP with none of nginx's
+TLS or rate limiting in front of it — treat it as a short-lived debugging
+window, not a standing access method, and always run `off` when you're done.
 
 ---
 
